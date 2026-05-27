@@ -1,0 +1,2811 @@
+Developer Brief: Build activegraph-memory as an ActiveGraph-Native Memory Pack
+
+Mission
+
+Create a new repository called:
+
+activegraph-memory
+
+This repo should implement an installable ActiveGraph pack named:
+
+memory
+
+The package should make memory a first-class ActiveGraph capability.
+
+The goal is not to build another standalone vector-memory library. The goal is to build an ActiveGraph-native memory lifecycle system where memory is represented as graph state, updated by behaviors, grounded in evidence, and backed by event-sourced lineage.
+
+Core thesis:
+
+Memory is not just retrieval.
+Memory is state evolution.
+A memory system should track:
+- what was observed
+- what was extracted
+- what evidence supports it
+- what changed
+- what conflicted
+- what was superseded
+- what was retrieved
+- what was used
+- whether it helped
+
+This package should demonstrate why ActiveGraph is a strong substrate for agent memory.
+
+⸻
+
+Required Research Before Coding
+
+Before writing implementation code, inspect the current ActiveGraph repository and docs.
+
+Read at minimum:
+
+ActiveGraph README
+ActiveGraph pack docs
+ActiveGraph behavior docs
+ActiveGraph LLM behavior docs
+ActiveGraph tool docs
+ActiveGraph event log docs
+ActiveGraph object/relation schema docs
+ActiveGraph prompt docs
+ActiveGraph settings docs
+ActiveGraph fork / diff docs
+Existing first-party or example packs
+Existing tests for packs, behaviors, tools, prompts, fork/diff
+
+Use the actual current ActiveGraph APIs.
+
+Do not invent APIs if equivalents already exist.
+
+If docs and code disagree, prefer code.
+
+If APIs are unclear, inspect tests and examples.
+
+If a feature is unavailable or unstable, document the limitation and implement the closest idiomatic version.
+
+Create a short implementation note at:
+
+docs/activegraph_native_design.md
+
+It should summarize:
+
+- exact pack API used
+- exact behavior API used
+- exact LLM behavior API used
+- exact tool API used
+- exact prompt loading API used
+- exact settings API used
+- exact fork/diff API used, if available
+- any gaps or assumptions
+
+⸻
+
+Architectural Direction
+
+Build this as an ActiveGraph pack first.
+
+The primary architecture should be:
+
+ActiveGraph graph
+→ memory objects
+→ typed memory relations
+→ behaviors that update memory state
+→ event log as source of truth
+→ retrieval, answer, evaluation, and policy comparison derived from graph state
+
+Avoid making the package primarily:
+
+MemoryEngine
+→ external memory database
+→ optional ActiveGraph adapter
+
+A small convenience wrapper may be added, but it should sit on top of graph objects and behaviors. It should not become the core architecture.
+
+ActiveGraph should remain the substrate.
+
+⸻
+
+Naming
+
+Repository
+
+activegraph-memory
+
+Python Package
+
+activegraph_memory
+
+ActiveGraph Pack Name
+
+memory
+
+Import Shape
+
+Preferred user-facing import:
+
+from activegraph_memory import pack
+
+Optional later convenience import:
+
+from activegraph_memory import observe_memory, query_memory
+
+Do not build convenience APIs until the pack itself is working.
+
+⸻
+
+Pack Entry Point
+
+The package must expose an ActiveGraph pack through Python entry points.
+
+In pyproject.toml, include the current ActiveGraph equivalent of:
+
+[project.entry-points."activegraph.packs"]
+memory = "activegraph_memory:pack"
+
+Confirm the exact entry point group from current ActiveGraph code/docs before finalizing.
+
+⸻
+
+Target Repository Structure
+
+Use this structure unless current ActiveGraph conventions strongly suggest a better one:
+
+activegraph-memory/
+  README.md
+  LICENSE
+  pyproject.toml
+  .gitignore
+  activegraph_memory/
+    __init__.py
+    settings.py
+    types.py
+    relations.py
+    constants.py
+    behaviors/
+      __init__.py
+      extract_candidate_memories.py
+      detect_contradictions.py
+      retrieve_memories.py
+      answer_with_evidence.py
+      plan_memory_retrieval.py
+      fallback_retrieve.py
+      resolve_temporal_refs.py
+      attach_numeric_scope.py
+      consolidate_memories.py
+      forget_or_archive_memory.py
+      evaluate_memory_usage.py
+    prompts/
+      extract_candidate_memories.md
+      detect_contradictions.md
+      plan_memory_retrieval.md
+      answer_with_evidence.md
+      resolve_temporal_refs.md
+      attach_numeric_scope.md
+      consolidate_memories.md
+      evaluate_memory_usage.md
+    tools/
+      __init__.py
+      keyword_search.py
+      vector_search.py
+      embeddings.py
+      text_normalize.py
+      scoring.py
+    fixtures/
+      simple_conversation.jsonl
+      contradiction_conversation.jsonl
+      procedural_memory.jsonl
+      numeric_memory.jsonl
+      temporal_memory.jsonl
+      fallback_retrieval.jsonl
+      policy_comparison.jsonl
+  examples/
+    basic_memory_run.py
+    contradiction_demo.py
+    procedural_memory_demo.py
+    temporal_memory_demo.py
+    numeric_memory_demo.py
+    fallback_retrieval_demo.py
+    fork_memory_policy.py
+    memory_evaluation_demo.py
+  tests/
+    test_pack_loads.py
+    test_object_types.py
+    test_relation_types.py
+    test_basic_memory_lifecycle.py
+    test_procedural_memory.py
+    test_contradiction_supersession.py
+    test_retrieval_links_evidence.py
+    test_answer_with_evidence.py
+    test_retrieval_planning.py
+    test_fallback_retrieval.py
+    test_temporal_refs.py
+    test_numeric_scope.py
+    test_memory_consolidation.py
+    test_forget_or_archive_memory.py
+    test_evaluate_memory_usage.py
+    test_fork_memory_policy.py
+    test_no_live_network_in_tests.py
+  docs/
+    architecture.md
+    activegraph_native_design.md
+    memory_lifecycle.md
+    object_model.md
+    relation_model.md
+    behavior_model.md
+    prompt_model.md
+    retrieval_model.md
+    temporal_reasoning.md
+    numeric_reasoning.md
+    contradiction_handling.md
+    forgetting_and_archival.md
+    evaluation.md
+    benchmark_plan.md
+    roadmap.md
+
+⸻
+
+Design Philosophy
+
+The package should demonstrate that memory is not a passive storage layer.
+
+Memory has lifecycle:
+
+observed
+extracted
+supported
+indexed
+retrieved
+used
+evaluated
+updated
+contradicted
+superseded
+consolidated
+forgotten or archived
+
+ActiveGraph should make this lifecycle:
+
+inspectable
+replayable
+forkable
+diffable
+auditable
+behavior-driven
+evidence-linked
+
+The implementation should favor explicit graph structure over hidden prompt behavior.
+
+Prompts can help extract and reason, but graph objects and relations should preserve the memory state.
+
+⸻
+
+Core Product Requirements
+
+The pack should support:
+
+1. Observation ingestion
+2. Semantic memory extraction
+3. Episodic memory extraction
+4. Procedural memory extraction
+5. Evidence linkage
+6. Memory retrieval
+7. Answer generation from retrieved memory
+8. Contradiction detection
+9. Supersession handling
+10. Retrieval planning
+11. Fallback retrieval
+12. Temporal grounding
+13. Numeric attribution
+14. Memory consolidation
+15. Explicit forgetting/archive behavior
+16. Memory usage evaluation
+17. Fork/diff comparison of memory policies
+
+Implement in stages, but design the package so all of these fit cleanly.
+
+⸻
+
+ActiveGraph-Native Model
+
+The event log is the source of truth.
+
+Graph objects represent projected memory state.
+
+Relations represent evidence, support, contradiction, retrieval, usage, and lifecycle links.
+
+Behaviors update the graph in response to events.
+
+A memory should never appear as an isolated string in a store with no provenance.
+
+Every memory should be able to answer:
+
+Where did this come from?
+What evidence supports it?
+What older memory did it update or supersede?
+What conflicts with it?
+When was it retrieved?
+When was it used?
+Did it affect an answer?
+Was that answer later evaluated?
+
+⸻
+
+Object Types
+
+Implement these object types.
+
+Use Pydantic models or the current ActiveGraph schema convention.
+
+1. memory_observation
+
+Represents something observed by the system.
+
+Examples:
+
+user message
+assistant message
+tool result
+document chunk
+meeting note
+email snippet
+benchmark turn
+user correction
+external event
+
+Suggested schema:
+
+class MemoryObservation(BaseModel):
+    actor: str | None = None
+    content: str
+    source: str | None = None
+    source_id: str | None = None
+    occurred_at: datetime | None = None
+    observed_at: datetime | None = None
+    metadata: dict[str, Any] = {}
+
+Rules:
+
+occurred_at = when the event described happened
+observed_at = when the system ingested or observed it
+Do not conflate occurred_at and observed_at.
+If ActiveGraph provides event timestamps, use those instead of generating timestamps inside behaviors.
+
+⸻
+
+2. memory_claim
+
+Represents a durable semantic memory.
+
+Examples:
+
+"The user prefers lowercase X posts."
+"The user dislikes em dashes."
+"Fund III target is $20–25M."
+"ActiveGraph uses an event log as source of truth."
+
+Suggested schema:
+
+class MemoryClaim(BaseModel):
+    content: str
+    subject: str | None = None
+    predicate: str | None = None
+    object: str | None = None
+    confidence: float = 1.0
+    status: Literal[
+        "active",
+        "superseded",
+        "archived",
+        "deleted",
+        "needs_review"
+    ] = "active"
+    tags: list[str] = []
+    metadata: dict[str, Any] = {}
+
+Rules:
+
+Do not require strict subject/predicate/object extraction in the first implementation.
+Keep content as the primary usable field.
+Use structured fields when available.
+Do not over-extract from casual messages.
+
+⸻
+
+3. episodic_memory
+
+Represents something that happened.
+
+Examples:
+
+"The user met Variant Fund on May 26, 2026."
+"The founder decided not to take capital until $1M in commitments."
+"A benchmark run produced a specific result."
+
+Suggested schema:
+
+class EpisodicMemory(BaseModel):
+    content: str
+    occurred_at: datetime | None = None
+    actors: list[str] = []
+    entities: list[str] = []
+    source: str | None = None
+    confidence: float = 1.0
+    status: Literal[
+        "active",
+        "superseded",
+        "archived",
+        "deleted",
+        "needs_review"
+    ] = "active"
+    metadata: dict[str, Any] = {}
+
+⸻
+
+4. procedural_memory
+
+Represents durable instructions, preferences, policies, or style rules.
+
+Examples:
+
+"Use lowercase for X posts."
+"Avoid em dashes."
+"Prefer concise, direct responses."
+"When analyzing PDFs, inspect charts visually."
+
+Suggested schema:
+
+class ProceduralMemory(BaseModel):
+    content: str
+    applies_to: list[str] = []
+    priority: int = 0
+    confidence: float = 1.0
+    status: Literal[
+        "active",
+        "superseded",
+        "archived",
+        "deleted",
+        "needs_review"
+    ] = "active"
+    metadata: dict[str, Any] = {}
+
+Rules:
+
+Procedural memories should affect future behavior.
+They should be retrievable separately from semantic and episodic memories.
+They should support priority.
+Higher-priority procedural memory should override lower-priority procedural memory when clearly conflicting.
+
+⸻
+
+5. memory_query
+
+Represents a request to retrieve memory.
+
+Suggested schema:
+
+class MemoryQuery(BaseModel):
+    question: str
+    requester: str | None = None
+    mode: Literal["standard", "deep"] = "standard"
+    memory_types: list[Literal["semantic", "episodic", "procedural"]] = []
+    required_data: list[str] = []
+    allow_general_knowledge: bool | None = None
+    metadata: dict[str, Any] = {}
+
+⸻
+
+6. retrieval_plan
+
+Represents a structured retrieval plan.
+
+Suggested schema:
+
+class RetrievalPlan(BaseModel):
+    query_id: str
+    vector_queries: list[str] = []
+    keywords: list[str] = []
+    memory_types: list[Literal["semantic", "episodic", "procedural"]] = []
+    mode: Literal["standard", "deep"] = "standard"
+    required_data: list[str] = []
+    filters: dict[str, Any] = {}
+    metadata: dict[str, Any] = {}
+
+Rules:
+
+Retrieval planning should be explicit.
+The plan should be stored as graph state.
+This makes retrieval inspectable and debuggable.
+
+⸻
+
+7. memory_retrieval_result
+
+Represents retrieved memories.
+
+Suggested schema:
+
+class MemoryRetrievalResult(BaseModel):
+    query_id: str
+    plan_id: str | None = None
+    retrieved_object_ids: list[str] = []
+    summary: str | None = None
+    missing_data: list[str] = []
+    confidence: float = 1.0
+    metadata: dict[str, Any] = {}
+
+⸻
+
+8. memory_answer
+
+Represents an answer generated from retrieved memory.
+
+Suggested schema:
+
+class MemoryAnswer(BaseModel):
+    query_id: str
+    retrieval_result_id: str | None = None
+    answer: str
+    used_memory_ids: list[str] = []
+    evidence_ids: list[str] = []
+    missing_data: list[str] = []
+    confidence: float = 1.0
+    metadata: dict[str, Any] = {}
+
+Rules:
+
+Answers should link to the memories they used.
+Answers should be able to represent missing evidence.
+Answers should not silently invent unsupported memories.
+
+⸻
+
+9. quantity_claim
+
+Represents a numeric fact with ownership and scope.
+
+Suggested schema:
+
+class QuantityClaim(BaseModel):
+    raw_value: str
+    value: float | None = None
+    unit: str | None = None
+    owner: str | None = None
+    property: str | None = None
+    item_or_event: str | None = None
+    exactness: Literal[
+        "exact",
+        "approximate",
+        "lower_bound",
+        "upper_bound",
+        "range",
+        "unknown"
+    ] = "unknown"
+    can_sum_exactly: bool = False
+    confidence: float = 1.0
+    metadata: dict[str, Any] = {}
+
+Reason:
+
+Numeric memory often fails because nearby unrelated numbers are used incorrectly.
+The graph should encode what each number belongs to.
+
+Examples:
+
+"$20–25M" belongs to Fund III target size.
+"36 companies" belongs to fund construction.
+"25%" belongs to reserves policy.
+
+⸻
+
+10. temporal_ref
+
+Represents a resolved or unresolved time reference.
+
+Suggested schema:
+
+class TemporalRef(BaseModel):
+    text: str
+    resolved_at: datetime | None = None
+    anchor: str | None = None
+    resolution_method: Literal[
+        "explicit_date",
+        "relative_to_observation",
+        "relative_to_event",
+        "relative_to_benchmark_now",
+        "unresolved"
+    ] = "unresolved"
+    confidence: float = 1.0
+    metadata: dict[str, Any] = {}
+
+Reason:
+
+Memory systems must distinguish:
+- when something happened
+- when it was observed
+- when it was stored
+- when the question is being asked
+
+⸻
+
+11. memory_consolidation
+
+Represents a merge or consolidation operation.
+
+Suggested schema:
+
+class MemoryConsolidation(BaseModel):
+    source_memory_ids: list[str]
+    consolidated_memory_id: str | None = None
+    reason: str
+    confidence: float = 1.0
+    metadata: dict[str, Any] = {}
+
+⸻
+
+12. memory_evaluation
+
+Represents an evaluation of whether retrieved/used memory helped.
+
+Suggested schema:
+
+class MemoryEvaluation(BaseModel):
+    answer_id: str | None = None
+    query_id: str | None = None
+    used_memory_ids: list[str] = []
+    outcome: Literal[
+        "helpful",
+        "unhelpful",
+        "incorrect",
+        "unsupported",
+        "partially_helpful",
+        "unknown"
+    ] = "unknown"
+    score: float | None = None
+    notes: str | None = None
+    metadata: dict[str, Any] = {}
+
+⸻
+
+13. memory_policy
+
+Represents extraction/retrieval/consolidation policy settings as graph state.
+
+Suggested schema:
+
+class MemoryPolicy(BaseModel):
+    name: str
+    description: str | None = None
+    extraction_confidence_threshold: float = 0.65
+    contradiction_confidence_threshold: float = 0.75
+    retrieval_limit: int = 10
+    retrieval_mode_default: Literal["standard", "deep"] = "standard"
+    consolidate_duplicates: bool = True
+    allow_general_knowledge_in_answers: bool = False
+    metadata: dict[str, Any] = {}
+
+Reason:
+
+Policies should be comparable across forks.
+A key ActiveGraph demo should show the same event history under different memory policies.
+
+⸻
+
+Relation Types
+
+Implement these relation types.
+
+Use the current ActiveGraph relation type API.
+
+1. derived_from
+
+Connects extracted memory to the observation it came from.
+
+Example:
+
+(memory_claim)-[:derived_from]->(memory_observation)
+(episodic_memory)-[:derived_from]->(memory_observation)
+(procedural_memory)-[:derived_from]->(memory_observation)
+
+⸻
+
+2. supports
+
+Connects evidence to a claim or answer.
+
+Examples:
+
+(memory_observation)-[:supports]->(memory_claim)
+(memory_claim)-[:supports]->(memory_answer)
+(episodic_memory)-[:supports]->(memory_answer)
+
+⸻
+
+3. contradicts
+
+Connects two incompatible memories.
+
+Example:
+
+(memory_claim)-[:contradicts]->(memory_claim)
+(procedural_memory)-[:contradicts]->(procedural_memory)
+
+⸻
+
+4. supersedes
+
+Connects a newer memory to an older memory it replaces.
+
+Example:
+
+(new_memory_claim)-[:supersedes]->(old_memory_claim)
+(new_procedural_memory)-[:supersedes]->(old_procedural_memory)
+
+⸻
+
+5. retrieved_for
+
+Connects retrieved memories to a query or retrieval result.
+
+Examples:
+
+(memory_claim)-[:retrieved_for]->(memory_query)
+(memory_claim)-[:retrieved_for]->(memory_retrieval_result)
+(procedural_memory)-[:retrieved_for]->(memory_retrieval_result)
+
+⸻
+
+6. used_in_answer
+
+Connects memories actually used in an answer.
+
+Example:
+
+(memory_claim)-[:used_in_answer]->(memory_answer)
+(procedural_memory)-[:used_in_answer]->(memory_answer)
+
+⸻
+
+7. has_quantity
+
+Connects a memory to a numeric claim.
+
+Example:
+
+(memory_claim)-[:has_quantity]->(quantity_claim)
+
+⸻
+
+8. has_temporal_ref
+
+Connects a memory to a temporal reference.
+
+Example:
+
+(episodic_memory)-[:has_temporal_ref]->(temporal_ref)
+(memory_claim)-[:has_temporal_ref]->(temporal_ref)
+
+⸻
+
+9. about_entity
+
+Connects memory to an entity object if ActiveGraph has a generic entity object type available.
+
+If ActiveGraph does not have generic entity objects, defer this relation.
+
+Example:
+
+(memory_claim)-[:about_entity]->(entity)
+
+⸻
+
+10. same_entity_as
+
+Connects two entity-like references judged to refer to the same thing.
+
+Defer if entity model is not available.
+
+⸻
+
+11. validated_by
+
+Connects a memory or answer to an evaluation that validates it.
+
+Example:
+
+(memory_answer)-[:validated_by]->(memory_evaluation)
+
+⸻
+
+12. invalidated_by
+
+Connects a memory or answer to an evaluation that invalidates it.
+
+Example:
+
+(memory_answer)-[:invalidated_by]->(memory_evaluation)
+(memory_claim)-[:invalidated_by]->(memory_evaluation)
+
+⸻
+
+13. consolidated_into
+
+Connects older duplicate/overlapping memories to a consolidated memory.
+
+Example:
+
+(memory_claim)-[:consolidated_into]->(memory_claim)
+
+⸻
+
+14. governed_by_policy
+
+Connects memory operations or outputs to the policy that governed them.
+
+Examples:
+
+(memory_claim)-[:governed_by_policy]->(memory_policy)
+(memory_retrieval_result)-[:governed_by_policy]->(memory_policy)
+(memory_answer)-[:governed_by_policy]->(memory_policy)
+
+⸻
+
+Behavior Requirements
+
+Use ActiveGraph behaviors, LLM behaviors, and tools according to current framework conventions.
+
+Behavior bodies must respect ActiveGraph determinism rules.
+
+Do not perform direct LLM calls inside normal behavior bodies.
+
+Do not perform direct network calls inside normal behavior bodies.
+
+Do not call:
+
+datetime.now()
+uuid.uuid4()
+random.random()
+requests.get(...)
+openai.chat.completions.create(...)
+
+inside deterministic behavior bodies.
+
+Do not write files directly from behavior bodies unless ActiveGraph explicitly allows that pattern.
+
+Use framework-provided IDs, event timestamps, tools, and LLM behavior mechanisms.
+
+Tests must not require live network or live model calls.
+
+⸻
+
+Behavior 1: extract_candidate_memories
+
+Purpose
+
+Extract durable memory objects from a new memory_observation.
+
+Trigger
+
+object.created where object.type == "memory_observation"
+
+Use exact ActiveGraph event/filter syntax after checking docs.
+
+Behavior
+
+For each observation, decide whether it contains durable memory.
+
+It may create:
+
+memory_claim
+episodic_memory
+procedural_memory
+quantity_claim
+temporal_ref
+
+For each created memory:
+
+link memory to source observation with derived_from
+link source observation to memory with supports
+attach quantity_claim objects if numeric facts are extracted
+attach temporal_ref objects if time references are extracted
+
+Extraction Guidelines
+
+Prioritize:
+
+durable user preferences
+durable project facts
+durable entity facts
+explicit decisions
+corrections
+procedural instructions
+facts likely to matter later
+dated events
+important numbers with clear ownership
+
+Avoid:
+
+trivial one-off phrasing
+temporary context with no future value
+unsupported inference
+overly broad summarization
+sensitive personal attributes unless explicitly relevant to the application
+
+Output
+
+Prefer structured outputs.
+
+Suggested candidate structure:
+
+class ExtractedMemoryCandidate(BaseModel):
+    memory_type: Literal["semantic", "episodic", "procedural"]
+    content: str
+    confidence: float
+    reason: str
+    quantities: list[QuantityClaim] = []
+    temporal_refs: list[TemporalRef] = []
+
+⸻
+
+Behavior 2: detect_contradictions
+
+Purpose
+
+Detect whether a new memory conflicts with existing active memories.
+
+Trigger
+
+object.created where object.type in [
+  "memory_claim",
+  "episodic_memory",
+  "procedural_memory"
+]
+
+Behavior
+
+When a memory is created:
+
+retrieve nearby active memories
+compare for contradiction
+compare for supersession
+create contradicts relation if incompatible
+create supersedes relation if the newer memory clearly replaces the older one
+patch older memory status to superseded if safe
+mark needs_review if uncertain
+
+Rules
+
+Be conservative.
+
+Do not treat weak tension as contradiction.
+
+Do not delete older memory.
+
+Prefer:
+
+superseded
+archived
+needs_review
+
+over deletion.
+
+Deletion should be reserved for explicit forgetting flows.
+
+⸻
+
+Behavior 3: plan_memory_retrieval
+
+Purpose
+
+Create an explicit retrieval plan from a memory query.
+
+Trigger
+
+object.created where object.type == "memory_query"
+
+Behavior
+
+Create a retrieval_plan object.
+
+The plan should include:
+
+keywords
+vector_queries
+memory_types
+mode
+required_data
+filters
+
+Retrieval Modes
+
+standard
+
+Use for simple questions and direct preference lookup.
+
+deep
+
+Use for:
+
+timelines
+aggregations
+multi-hop questions
+questions involving dates
+questions involving numbers
+questions involving contradictions
+questions requiring history
+
+Output
+
+Create:
+
+retrieval_plan
+
+Link it to query if relation exists or store query_id.
+
+⸻
+
+Behavior 4: retrieve_memories
+
+Purpose
+
+Retrieve relevant memories for a retrieval_plan or memory_query.
+
+Trigger
+
+Preferred:
+
+object.created where object.type == "retrieval_plan"
+
+Fallback:
+
+object.created where object.type == "memory_query"
+
+Behavior
+
+Retrieve relevant memory objects.
+
+Search across:
+
+memory_claim
+episodic_memory
+procedural_memory
+
+Use:
+
+keyword search
+graph filters
+optional vector search
+procedural rule matching
+status filtering
+temporal filtering
+
+Ranking
+
+Rank active memories first.
+
+Prefer memories with:
+
+direct keyword match
+strong evidence
+higher confidence
+recent supersession status if relevant
+procedural priority when procedural memory is requested
+
+Include superseded memories only when the query asks about history or why something changed.
+
+Output
+
+Create:
+
+memory_retrieval_result
+
+Add:
+
+retrieved_for relations
+
+from retrieved memories to the query/result.
+
+⸻
+
+Behavior 5: fallback_retrieve
+
+Purpose
+
+Run a second retrieval pass when required evidence is missing.
+
+Trigger
+
+memory.required_data_missing
+
+or:
+
+object.created where object.type == "memory_retrieval_result" and missing_data is non-empty
+
+Use the exact ActiveGraph mechanism available.
+
+Behavior
+
+For each missing item:
+
+create targeted retrieval plan
+run focused retrieval
+merge results into a new retrieval result
+preserve relation to original query
+record that fallback was used
+
+Rules
+
+Fallback should be targeted.
+
+Do not broaden retrieval blindly.
+
+If evidence remains missing, preserve missing_data.
+
+⸻
+
+Behavior 6: answer_with_evidence
+
+Purpose
+
+Generate an answer from retrieved memories.
+
+Trigger
+
+object.created where object.type == "memory_retrieval_result"
+
+Behavior
+
+Use retrieved memory objects to create a grounded answer.
+
+Create:
+
+memory_answer
+
+Add:
+
+used_in_answer relations
+
+from actually used memories to the answer.
+
+Rules
+
+Answer only from retrieved memories unless settings explicitly allow general knowledge.
+
+If evidence is insufficient, say so in the answer and populate missing_data.
+
+Use procedural memories as style/instruction constraints.
+
+Do not hallucinate unsupported memories.
+
+Do not cite internal object IDs in user-facing prose unless examples require it.
+
+⸻
+
+Behavior 7: resolve_temporal_refs
+
+Purpose
+
+Extract and resolve temporal references from memory objects.
+
+Trigger
+
+object.created where object.type in [
+  "memory_claim",
+  "episodic_memory",
+  "memory_observation"
+]
+
+Behavior
+
+Find temporal references such as:
+
+today
+yesterday
+last week
+in May
+May 26
+Q1 2026
+after the meeting
+before the fundraise
+
+Resolve when possible.
+
+Create:
+
+temporal_ref
+
+Add:
+
+has_temporal_ref
+
+relations.
+
+Rules
+
+Preserve unresolved references.
+
+Do not over-resolve ambiguous references.
+
+Record the anchor used for resolution.
+
+Distinguish:
+
+event time
+observation time
+storage time
+query time
+
+⸻
+
+Behavior 8: attach_numeric_scope
+
+Purpose
+
+Extract numeric facts and attach ownership/scope.
+
+Trigger
+
+object.created where object.type in [
+  "memory_claim",
+  "episodic_memory",
+  "memory_observation"
+]
+
+Behavior
+
+Find numbers and quantities.
+
+For each quantity, determine:
+
+raw value
+normalized value if possible
+unit
+owner
+property
+item/event
+exactness
+whether it can be safely summed
+
+Create:
+
+quantity_claim
+
+Add:
+
+has_quantity
+
+relations.
+
+Rules
+
+Do not attach numbers to the wrong entity.
+
+Do not use nearby numbers as evidence unless ownership is clear.
+
+Represent approximate values as approximate.
+
+Represent ranges as ranges or preserve raw value if no range schema is available.
+
+⸻
+
+Behavior 9: consolidate_memories
+
+Purpose
+
+Merge duplicate or overlapping memories.
+
+Trigger
+
+Possible triggers:
+
+object.created where object.type in ["memory_claim", "episodic_memory", "procedural_memory"]
+scheduled consolidation event
+manual consolidation request
+
+Use whatever ActiveGraph supports.
+
+Behavior
+
+Find duplicate or overlapping memories.
+
+Create a consolidated memory if useful.
+
+Create:
+
+memory_consolidation
+
+Add:
+
+consolidated_into
+
+relations from source memories to consolidated memory.
+
+Patch old memories to:
+
+archived
+
+or:
+
+superseded
+
+depending on semantics.
+
+Rules
+
+Do not consolidate memories that differ materially.
+
+Do not lose evidence links.
+
+The consolidated memory should preserve references to source memories and original observations.
+
+⸻
+
+Behavior 10: forget_or_archive_memory
+
+Purpose
+
+Support explicit forgetting or archival flows.
+
+Trigger
+
+Possible triggers:
+
+manual forget request object
+manual archive request object
+procedural deletion instruction
+
+Define object types if needed:
+
+memory_forget_request
+memory_archive_request
+
+Behavior
+
+For archive:
+
+patch memory status to archived
+preserve lineage
+exclude archived memory from normal retrieval
+
+For delete:
+
+use ActiveGraph’s established privacy/deletion mechanism if available
+otherwise patch status to deleted and exclude from retrieval
+
+Rules
+
+Do not permanently erase event history unless ActiveGraph has an established deletion/privacy mechanism.
+
+Make the behavior explicit and auditable.
+
+⸻
+
+Behavior 11: evaluate_memory_usage
+
+Purpose
+
+Evaluate whether retrieved/used memory helped produce a good answer.
+
+Trigger
+
+Possible triggers:
+
+object.created where object.type == "memory_answer"
+manual evaluation request
+benchmark evaluation event
+user correction event
+
+Behavior
+
+Create:
+
+memory_evaluation
+
+Link evaluation to answer with:
+
+validated_by
+invalidated_by
+
+where appropriate.
+
+Evaluation Outcomes
+
+Use:
+
+helpful
+unhelpful
+incorrect
+unsupported
+partially_helpful
+unknown
+
+Rules
+
+This behavior is important for future learning.
+
+It should support benchmark integrations.
+
+It should not mutate source memory aggressively in the first pass.
+
+⸻
+
+Prompts
+
+Store prompts in:
+
+activegraph_memory/prompts/
+
+Use current ActiveGraph prompt loading/versioning conventions.
+
+Prompts should be:
+
+short
+specific
+structured-output friendly
+separate by task
+easy to test with fixtures
+
+Avoid one giant prompt.
+
+⸻
+
+Prompt: extract_candidate_memories.md
+
+Should instruct the model to extract only durable memories.
+
+Candidate memory types:
+
+semantic
+episodic
+procedural
+
+Rules:
+
+Do not store trivial facts.
+Prefer procedural memory for instructions and preferences.
+Prefer episodic memory for dated events.
+Prefer semantic memory for stable facts.
+Extract quantities only when ownership is clear.
+Extract temporal references when useful.
+Be conservative.
+Return structured output.
+
+Suggested output fields:
+
+memory_type
+content
+confidence
+reason
+quantities
+temporal_refs
+
+⸻
+
+Prompt: detect_contradictions.md
+
+Rules:
+
+Identify direct contradictions.
+Identify supersession.
+Do not mark weak tension as contradiction.
+Prefer needs_review if uncertain.
+Explain the reason briefly.
+Return structured output.
+
+Suggested output fields:
+
+relation_type: contradicts | supersedes | none | needs_review
+source_memory_id
+target_memory_id
+reason
+confidence
+
+⸻
+
+Prompt: plan_memory_retrieval.md
+
+Rules:
+
+Convert the user query into a retrieval plan.
+Include keywords.
+Include vector-style semantic queries if supported.
+Identify memory types needed.
+Choose standard or deep mode.
+Identify required data.
+Return structured output.
+
+⸻
+
+Prompt: answer_with_evidence.md
+
+Rules:
+
+Answer from retrieved memories.
+Use procedural memories as style/instruction constraints.
+Mention missing evidence when necessary.
+Do not invent unsupported memories.
+Do not cite internal IDs in user-facing prose unless asked.
+Return answer plus used memory IDs.
+
+⸻
+
+Prompt: resolve_temporal_refs.md
+
+Rules:
+
+Extract temporal references.
+Resolve explicit dates.
+Resolve relative dates only when anchor is clear.
+Preserve unresolved references.
+Return structured output.
+
+⸻
+
+Prompt: attach_numeric_scope.md
+
+Rules:
+
+Extract numbers and quantities.
+Identify owner/entity.
+Identify measured property.
+Identify unit.
+Identify exactness.
+Do not attach unrelated nearby numbers.
+Return structured output.
+
+⸻
+
+Prompt: consolidate_memories.md
+
+Rules:
+
+Identify duplicates and near-duplicates.
+Do not merge materially different memories.
+Preserve evidence.
+Return consolidation recommendation.
+
+⸻
+
+Prompt: evaluate_memory_usage.md
+
+Rules:
+
+Evaluate whether the answer was supported by the retrieved memories.
+Identify unsupported claims.
+Identify useful memories.
+Identify misleading memories.
+Return structured output.
+
+⸻
+
+Tools
+
+Tools should be deterministic in tests.
+
+Do not require network access for tests.
+
+keyword_search
+
+Simple text search over memory object content.
+
+Requirements:
+
+deterministic
+no network
+works in tests
+supports memory type filtering
+supports status filtering
+
+vector_search
+
+Optional but should be part of the full design.
+
+Requirements:
+
+optional dependency
+deterministic mock embeddings in tests
+supports memory type filtering
+supports status filtering
+does not require external API in tests
+
+embeddings
+
+Provide an interface.
+
+Implement:
+
+DeterministicEmbeddingProvider for tests
+OptionalOpenAIEmbeddingProvider if current tool conventions allow
+
+Do not call OpenAI directly inside deterministic behaviors.
+
+text_normalize
+
+Utility for tokenization, lowercasing, punctuation cleanup, keyword extraction.
+
+Should be deterministic.
+
+scoring
+
+Utility for retrieval scoring.
+
+Should be deterministic.
+
+⸻
+
+Settings
+
+Create a settings schema.
+
+Use current ActiveGraph settings conventions.
+
+Suggested schema:
+
+class MemorySettings(BaseModel):
+    enable_semantic_memory: bool = True
+    enable_episodic_memory: bool = True
+    enable_procedural_memory: bool = True
+    enable_retrieval_planning: bool = True
+    enable_keyword_retrieval: bool = True
+    enable_vector_retrieval: bool = False
+    enable_contradiction_detection: bool = True
+    enable_temporal_resolution: bool = True
+    enable_numeric_scope: bool = True
+    enable_consolidation: bool = True
+    enable_fallback_retrieval: bool = True
+    enable_answer_generation: bool = True
+    enable_memory_evaluation: bool = True
+    extraction_confidence_threshold: float = 0.65
+    contradiction_confidence_threshold: float = 0.75
+    consolidation_confidence_threshold: float = 0.85
+    retrieval_mode_default: Literal["standard", "deep"] = "standard"
+    retrieval_limit: int = 10
+    fallback_retrieval_limit: int = 5
+    include_superseded_in_standard_retrieval: bool = False
+    include_archived_in_standard_retrieval: bool = False
+    allow_general_knowledge_in_answers: bool = False
+    default_policy_name: str = "default"
+
+⸻
+
+README Requirements
+
+The README should be complete and developer-facing.
+
+It should include:
+
+1. One-sentence description
+2. Why this exists
+3. ActiveGraph-native thesis
+4. Installation
+5. Minimal usage
+6. Pack loading
+7. Memory lifecycle diagram
+8. Object types
+9. Relation types
+10. Behavior list
+11. Settings
+12. Examples
+13. Development setup
+14. Test instructions
+15. Roadmap
+16. Optional inspiration section
+
+Suggested opening:
+
+# ActiveGraph Memory
+An ActiveGraph-native memory lifecycle pack.
+Most agent memory systems treat memory as retrieval. ActiveGraph Memory treats memory as state evolution: what was observed, what was extracted, what changed, what conflicted, what was retrieved, and what was used.
+
+Do not claim benchmark performance until benchmarks exist.
+
+Do not overstate capability.
+
+Use clear examples.
+
+⸻
+
+Optional README Inspiration Section
+
+If an inspiration section is included, make it short, factual, and positive.
+
+Suggested wording:
+
+## Inspiration
+ActiveGraph Memory is inspired by the broader shift from simple vector recall toward memory-first agent systems: semantic, episodic, and procedural memory; disciplined retrieval; temporal grounding; numeric attribution; fallback retrieval; and background consolidation.
+Recent open-source projects such as Quarq Agent explore related ideas. ActiveGraph Memory takes a graph-native approach, representing memory as event-sourced state evolution with explicit lineage, relations, and behavior-driven updates.
+
+This section is optional.
+
+The repo should stand on its own as an ActiveGraph-native memory pack.
+
+⸻
+
+Suggested README Usage Example
+
+Use actual APIs after checking ActiveGraph docs.
+
+Conceptual shape:
+
+from activegraph import Graph, Runtime
+from activegraph.packs import load_by_name
+from activegraph_memory import MemorySettings
+graph = Graph()
+runtime = Runtime(graph)
+runtime.load_pack(
+    load_by_name("memory"),
+    settings=MemorySettings(
+        enable_semantic_memory=True,
+        enable_episodic_memory=True,
+        enable_procedural_memory=True,
+    ),
+)
+graph.add_object(
+    "memory_observation",
+    {
+        "actor": "user",
+        "content": "Yohei prefers lowercase X posts and dislikes em dashes.",
+        "source": "chat",
+    },
+)
+runtime.run_until_idle()
+graph.add_object(
+    "memory_query",
+    {
+        "question": "How should I write Yohei's X posts?",
+        "mode": "standard",
+    },
+)
+runtime.run_until_idle()
+answers = graph.objects(type="memory_answer")
+print(answers[-1].answer)
+
+Do not commit this exact code if ActiveGraph APIs differ.
+
+Update it to match real APIs.
+
+⸻
+
+Suggested Memory Lifecycle Diagram
+
+Include in README or docs:
+
+memory_observation
+  ↓ extract_candidate_memories
+memory_claim / episodic_memory / procedural_memory
+  ↓ derived_from / supports
+evidence-linked memory graph
+  ↓ resolve_temporal_refs / attach_numeric_scope
+temporal_ref / quantity_claim
+  ↓ detect_contradictions
+contradicts / supersedes relations
+  ↓ consolidate_memories
+consolidated memory state
+  ↓ memory_query
+retrieval_plan
+  ↓ retrieve_memories
+memory_retrieval_result
+  ↓ fallback_retrieve if needed
+expanded retrieval result
+  ↓ answer_with_evidence
+memory_answer
+  ↓ evaluate_memory_usage
+memory_evaluation
+
+⸻
+
+Examples
+
+Implement all examples using current ActiveGraph APIs.
+
+If an API is unavailable, document the limitation in the example file and keep the example as close as possible.
+
+⸻
+
+Example 1: basic_memory_run.py
+
+Scenario:
+
+Observation:
+"Yohei prefers lowercase X posts and dislikes em dashes."
+Query:
+"How should I write Yohei's X posts?"
+
+Expected:
+
+Procedural memory is created.
+Query retrieves procedural memory.
+Answer says to use lowercase and avoid em dashes.
+
+⸻
+
+Example 2: contradiction_demo.py
+
+Scenario:
+
+Observation 1:
+"The project is called PythonFunc."
+Observation 2:
+"The project is now called BabyAGI."
+
+Expected graph state:
+
+Memory A: project called PythonFunc
+Memory B: project now called BabyAGI
+B supersedes A
+A is not deleted
+
+⸻
+
+Example 3: procedural_memory_demo.py
+
+Scenario:
+
+Observation:
+"For future X posts, use lowercase and keep it casual."
+Query:
+"Draft an X post style reminder."
+
+Expected:
+
+Procedural memory is retrieved and used.
+
+⸻
+
+Example 4: temporal_memory_demo.py
+
+Scenario:
+
+Observation date:
+2026-05-26
+Observation:
+"Yesterday I met the founder."
+
+Expected:
+
+temporal_ref is created
+"Yesterday" is resolved relative to observation date if anchor exists
+
+⸻
+
+Example 5: numeric_memory_demo.py
+
+Scenario:
+
+Observation:
+"Fund III target is $20–25M with around 36 investments and 25% reserves."
+
+Expected:
+
+quantity_claim objects are created
+numbers are attached to correct owners/properties
+
+⸻
+
+Example 6: fallback_retrieval_demo.py
+
+Scenario:
+
+Query asks for a specific number.
+First retrieval misses the relevant memory.
+Fallback retrieval targets missing data.
+
+Expected:
+
+fallback retrieval result links to original query
+missing data is reduced or preserved explicitly
+
+⸻
+
+Example 7: fork_memory_policy.py
+
+Purpose:
+
+Show why ActiveGraph matters for memory.
+
+Scenario:
+
+Same observation history.
+
+Fork A:
+
+conservative extraction threshold
+
+Fork B:
+
+aggressive extraction threshold
+
+Expected:
+
+Fork B extracts more memories.
+Fork A extracts fewer.
+Diff shows policy-driven difference in memory state.
+
+This is one of the most important examples.
+
+⸻
+
+Example 8: memory_evaluation_demo.py
+
+Scenario:
+
+A query retrieves memory.
+An answer uses memory.
+A user correction or benchmark label marks the answer partially incorrect.
+
+Expected:
+
+memory_evaluation object is created
+answer is linked to evaluation
+used memories can later be inspected
+
+⸻
+
+Tests
+
+Tests must be deterministic.
+
+No live OpenAI calls.
+
+No live web calls.
+
+No external services.
+
+Use fixture LLM outputs, mock tools, or deterministic tools.
+
+⸻
+
+Required Test: test_pack_loads.py
+
+Assert:
+
+package imports
+pack exists
+pack name is memory
+object types are registered
+relation types are registered
+behaviors are registered
+settings schema loads
+prompts load
+
+⸻
+
+Required Test: test_object_types.py
+
+Assert all object schemas validate representative examples:
+
+memory_observation
+memory_claim
+episodic_memory
+procedural_memory
+memory_query
+retrieval_plan
+memory_retrieval_result
+memory_answer
+quantity_claim
+temporal_ref
+memory_consolidation
+memory_evaluation
+memory_policy
+
+⸻
+
+Required Test: test_relation_types.py
+
+Assert relation types register correctly:
+
+derived_from
+supports
+contradicts
+supersedes
+retrieved_for
+used_in_answer
+has_quantity
+has_temporal_ref
+validated_by
+invalidated_by
+consolidated_into
+governed_by_policy
+
+⸻
+
+Required Test: test_basic_memory_lifecycle.py
+
+Flow:
+
+add memory_observation
+run runtime
+assert memory object created
+assert derived_from relation exists
+assert supports relation exists
+add memory_query
+run runtime
+assert retrieval_plan exists
+assert memory_retrieval_result exists
+assert memory_answer exists
+assert used_in_answer relation exists
+
+⸻
+
+Required Test: test_procedural_memory.py
+
+Flow:
+
+add procedural preference observation
+run runtime
+assert procedural_memory created
+query for style guidance
+assert procedural memory retrieved
+assert answer uses procedural memory
+
+⸻
+
+Required Test: test_contradiction_supersession.py
+
+Flow:
+
+add initial memory
+add superseding memory
+run runtime
+assert contradicts or supersedes relation exists
+assert old memory is not deleted
+assert old memory status is superseded or needs_review
+
+⸻
+
+Required Test: test_retrieval_links_evidence.py
+
+Assert:
+
+retrieval creates memory_retrieval_result
+relevant memories are linked via retrieved_for
+irrelevant memories are not linked
+
+⸻
+
+Required Test: test_answer_with_evidence.py
+
+Assert:
+
+answer uses retrieved memory
+used_in_answer relation exists
+unsupported answer is not generated when evidence is missing
+missing_data is populated when needed
+
+⸻
+
+Required Test: test_retrieval_planning.py
+
+Assert:
+
+memory_query creates retrieval_plan
+simple query uses standard mode
+timeline or numeric query uses deep mode when appropriate
+required_data is populated when appropriate
+
+⸻
+
+Required Test: test_fallback_retrieval.py
+
+Assert:
+
+missing_data triggers fallback
+fallback creates targeted retrieval plan
+fallback result links back to original query
+missing data is reduced or preserved explicitly
+
+⸻
+
+Required Test: test_temporal_refs.py
+
+Assert:
+
+explicit date is resolved
+relative date with anchor is resolved
+relative date without anchor remains unresolved
+temporal_ref is linked with has_temporal_ref
+
+⸻
+
+Required Test: test_numeric_scope.py
+
+Assert:
+
+quantity_claim is created
+number is attached to correct owner/property
+nearby unrelated number is not misattributed
+has_quantity relation exists
+
+⸻
+
+Required Test: test_memory_consolidation.py
+
+Assert:
+
+duplicate memories can consolidate
+source memories link to consolidated memory
+evidence is preserved
+materially different memories are not merged
+
+⸻
+
+Required Test: test_forget_or_archive_memory.py
+
+Assert:
+
+archive changes status to archived
+archived memory is excluded from standard retrieval
+deleted memory is excluded from retrieval
+lineage is preserved unless ActiveGraph has explicit deletion semantics
+
+⸻
+
+Required Test: test_evaluate_memory_usage.py
+
+Assert:
+
+memory_answer can be evaluated
+memory_evaluation is created
+validated_by or invalidated_by relation exists
+
+⸻
+
+Required Test: test_fork_memory_policy.py
+
+Assert:
+
+same event prefix can produce different memory states under different policies
+diff can be inspected or approximated
+policy objects or settings are linked to results if possible
+
+⸻
+
+Required Test: test_no_live_network_in_tests.py
+
+Assert or enforce:
+
+tests do not require external API keys
+tests do not call live OpenAI
+tests do not call web
+tests pass offline
+
+⸻
+
+Determinism Rules
+
+Strictly follow ActiveGraph’s determinism model.
+
+Behavior bodies should not do hidden side effects.
+
+Forbidden inside deterministic behavior bodies:
+
+datetime.now()
+uuid.uuid4()
+random.random()
+requests.get(...)
+openai.chat.completions.create(...)
+file writes
+database writes outside ActiveGraph APIs
+
+Use:
+
+framework-provided event timestamps
+framework-provided IDs
+framework tools
+framework LLM behaviors
+fixture providers in tests
+
+If a needed API is unclear, inspect ActiveGraph examples and tests.
+
+⸻
+
+Development Phases
+
+Implement the full system in ordered phases.
+
+Do not stop at the first phase unless blocked.
+
+Each phase should leave the repo in a working state.
+
+⸻
+
+Phase 0: ActiveGraph Research
+
+Tasks:
+
+inspect ActiveGraph docs
+inspect ActiveGraph repo
+identify pack API
+identify object type API
+identify relation type API
+identify behavior API
+identify LLM behavior API
+identify tool API
+identify prompt loading/versioning API
+identify settings API
+identify test patterns
+identify fork/diff APIs
+
+Output:
+
+docs/activegraph_native_design.md
+
+⸻
+
+Phase 1: Repository Skeleton
+
+Create:
+
+pyproject.toml
+README.md
+LICENSE
+.gitignore
+activegraph_memory/__init__.py
+activegraph_memory/settings.py
+activegraph_memory/types.py
+activegraph_memory/relations.py
+activegraph_memory/constants.py
+tests/test_pack_loads.py
+
+Requirements:
+
+pip install -e . works
+package imports
+pack exports
+pack registers via entry point
+basic pack load test passes
+
+⸻
+
+Phase 2: Object and Relation Model
+
+Implement all object types:
+
+memory_observation
+memory_claim
+episodic_memory
+procedural_memory
+memory_query
+retrieval_plan
+memory_retrieval_result
+memory_answer
+quantity_claim
+temporal_ref
+memory_consolidation
+memory_evaluation
+memory_policy
+
+Implement all relation types:
+
+derived_from
+supports
+contradicts
+supersedes
+retrieved_for
+used_in_answer
+has_quantity
+has_temporal_ref
+validated_by
+invalidated_by
+consolidated_into
+governed_by_policy
+
+Tests:
+
+test_object_types.py
+test_relation_types.py
+
+⸻
+
+Phase 3: Basic Extraction
+
+Implement:
+
+extract_candidate_memories
+
+Requirements:
+
+fires on memory_observation creation
+creates semantic/episodic/procedural memory
+links derived_from
+links supports
+uses LLM behavior or fixture equivalent
+works offline in tests
+
+Tests:
+
+test_basic_memory_lifecycle.py first half
+test_procedural_memory.py first half
+
+⸻
+
+Phase 4: Retrieval Planning and Retrieval
+
+Implement:
+
+plan_memory_retrieval
+retrieve_memories
+keyword_search tool
+
+Requirements:
+
+memory_query creates retrieval_plan
+retrieval_plan creates memory_retrieval_result
+retrieved memories link via retrieved_for
+supports semantic/episodic/procedural memory
+filters inactive/deleted memory
+respects retrieval limit
+
+Tests:
+
+test_retrieval_planning.py
+test_retrieval_links_evidence.py
+
+⸻
+
+Phase 5: Answer Generation
+
+Implement:
+
+answer_with_evidence
+
+Requirements:
+
+memory_retrieval_result creates memory_answer
+answer uses retrieved memories
+used memories link via used_in_answer
+missing_data preserved
+procedural memories influence answer style/instructions
+
+Tests:
+
+test_answer_with_evidence.py
+test_basic_memory_lifecycle.py full
+test_procedural_memory.py full
+
+⸻
+
+Phase 6: Contradiction and Supersession
+
+Implement:
+
+detect_contradictions
+
+Requirements:
+
+new memories are compared to active nearby memories
+contradicts relation created when appropriate
+supersedes relation created when appropriate
+old memories patched to superseded when safe
+uncertain cases marked needs_review
+no deletion
+
+Tests:
+
+test_contradiction_supersession.py
+
+⸻
+
+Phase 7: Temporal Reasoning
+
+Implement:
+
+resolve_temporal_refs
+
+Requirements:
+
+extract temporal refs
+resolve explicit dates
+resolve relative dates with anchors
+preserve unresolved refs
+link via has_temporal_ref
+distinguish occurred_at, observed_at, query time
+
+Tests:
+
+test_temporal_refs.py
+
+Example:
+
+examples/temporal_memory_demo.py
+
+⸻
+
+Phase 8: Numeric Attribution
+
+Implement:
+
+attach_numeric_scope
+
+Requirements:
+
+extract numeric facts
+identify owner/property/unit/exactness
+avoid unrelated nearby numbers
+create quantity_claim
+link via has_quantity
+
+Tests:
+
+test_numeric_scope.py
+
+Example:
+
+examples/numeric_memory_demo.py
+
+⸻
+
+Phase 9: Fallback Retrieval
+
+Implement:
+
+fallback_retrieve
+
+Requirements:
+
+detect missing_data
+create targeted retrieval plan
+retrieve again
+link fallback to original query/result
+preserve missing_data if still unresolved
+
+Tests:
+
+test_fallback_retrieval.py
+
+Example:
+
+examples/fallback_retrieval_demo.py
+
+⸻
+
+Phase 10: Consolidation
+
+Implement:
+
+consolidate_memories
+
+Requirements:
+
+detect duplicate/overlapping memories
+create consolidated memory when safe
+create memory_consolidation object
+link source memories via consolidated_into
+preserve evidence
+do not merge materially different memories
+
+Tests:
+
+test_memory_consolidation.py
+
+⸻
+
+Phase 11: Forgetting and Archival
+
+Implement:
+
+forget_or_archive_memory
+
+Add request object types if needed:
+
+memory_archive_request
+memory_forget_request
+
+Requirements:
+
+archive sets status archived
+delete sets status deleted or uses ActiveGraph deletion mechanism
+standard retrieval excludes archived/deleted memories
+lineage preserved unless official deletion semantics say otherwise
+
+Tests:
+
+test_forget_or_archive_memory.py
+
+Docs:
+
+docs/forgetting_and_archival.md
+
+⸻
+
+Phase 12: Memory Usage Evaluation
+
+Implement:
+
+evaluate_memory_usage
+
+Requirements:
+
+create memory_evaluation
+link answer to evaluation
+support helpful/unhelpful/incorrect/unsupported/partially_helpful/unknown
+support benchmark and user correction flows
+
+Tests:
+
+test_evaluate_memory_usage.py
+
+Example:
+
+examples/memory_evaluation_demo.py
+
+⸻
+
+Phase 13: Fork/Diff Policy Demo
+
+Implement:
+
+memory_policy object
+governed_by_policy relation if useful
+examples/fork_memory_policy.py
+test_fork_memory_policy.py
+
+Requirements:
+
+same event history can be replayed/forked under different memory policies
+diff reveals different extracted memories or relations
+example clearly shows ActiveGraph advantage
+
+If exact fork/diff APIs are unavailable:
+
+document limitation
+simulate comparison with two graph instances
+keep interface close to future fork/diff API
+
+⸻
+
+Phase 14: Documentation Completion
+
+Complete docs:
+
+docs/architecture.md
+docs/activegraph_native_design.md
+docs/memory_lifecycle.md
+docs/object_model.md
+docs/relation_model.md
+docs/behavior_model.md
+docs/prompt_model.md
+docs/retrieval_model.md
+docs/temporal_reasoning.md
+docs/numeric_reasoning.md
+docs/contradiction_handling.md
+docs/forgetting_and_archival.md
+docs/evaluation.md
+docs/benchmark_plan.md
+docs/roadmap.md
+
+Docs should be concise.
+
+Use diagrams where helpful.
+
+Do not make unsupported performance claims.
+
+⸻
+
+Phase 15: Benchmark Harness Design
+
+Implement only if core package is stable.
+
+Create:
+
+activegraph_memory/benchmarks/
+  __init__.py
+  fixtures.py
+  runner.py
+  metrics.py
+  memory_agent_bench_adapter.py
+  longmemeval_adapter.py
+
+or follow current repo conventions.
+
+Benchmark support should measure:
+
+memory extraction correctness
+evidence linkage correctness
+retrieval correctness
+answer correctness
+temporal accuracy
+numeric attribution accuracy
+contradiction handling
+fallback usefulness
+memory usage quality
+policy comparison across forks
+
+Do not require benchmark datasets to be downloaded in normal package tests.
+
+Use small local fixtures for CI.
+
+⸻
+
+Benchmark Metrics
+
+Implement or design metrics for:
+
+Extraction Precision
+
+Did the system extract only durable memories?
+Did it avoid trivial memories?
+
+Extraction Recall
+
+Did the system capture important durable facts?
+
+Evidence Link Accuracy
+
+Does each memory link back to the right observation?
+
+Retrieval Accuracy
+
+Did retrieval return the needed memory?
+Did it avoid irrelevant memories?
+
+Answer Grounding
+
+Was the answer supported by retrieved memories?
+
+Temporal Accuracy
+
+Were dates and relative references handled correctly?
+
+Numeric Attribution Accuracy
+
+Were numbers attached to the correct owner/property?
+
+Contradiction Handling
+
+Did the system detect contradiction or supersession correctly?
+
+Fallback Usefulness
+
+Did fallback retrieval recover missing evidence?
+
+Policy Diff Value
+
+Can different memory policies be replayed/forked and compared?
+
+⸻
+
+Non-Goals
+
+Do not build a chat UI.
+
+Do not build a FastAPI server unless needed for examples later.
+
+Do not require FAISS.
+
+Do not require LangGraph.
+
+Do not require OpenAI API keys for tests.
+
+Do not require live model calls for tests.
+
+Do not require live web calls for tests.
+
+Do not build a full production memory service.
+
+Do not optimize retrieval before graph lifecycle is correct.
+
+Do not claim benchmark performance before benchmarks are run.
+
+Do not make this a generic memory DB with ActiveGraph sprinkled on top.
+
+⸻
+
+Full Acceptance Criteria
+
+The repo is acceptable when all of the following are true.
+
+Packaging
+
+pip install -e . works
+package imports as activegraph_memory
+package exports pack
+pack is discoverable through ActiveGraph entry points
+
+ActiveGraph Integration
+
+pack loads in ActiveGraph runtime
+object types register
+relation types register
+behaviors register
+settings schema works
+prompts load
+tools load if implemented
+
+Memory Lifecycle
+
+memory_observation can create memory objects
+memory objects link to observations
+memory_query creates retrieval_plan
+retrieval_plan creates memory_retrieval_result
+retrieved memories link to result
+memory_retrieval_result creates memory_answer
+used memories link to answer
+
+Advanced Memory
+
+contradictions can be detected
+supersession can be represented
+temporal references can be extracted/resolved
+numeric claims can be scoped
+fallback retrieval can run
+memories can be consolidated
+memories can be archived/forgotten
+memory usage can be evaluated
+
+Fork/Diff
+
+different memory policies can be compared over the same or similar event history
+example demonstrates why event-sourced memory matters
+
+Tests
+
+tests pass offline
+tests require no API keys
+tests require no network
+tests cover all major object types
+tests cover all major relation types
+tests cover all major behaviors
+
+Docs
+
+README is clear
+architecture docs exist
+memory lifecycle docs exist
+object/relation/behavior docs exist
+examples are documented
+roadmap is documented
+benchmark plan is documented
+
+Quality
+
+simple readable Python
+typed models
+small modules
+deterministic tests
+no hidden side effects
+no unsupported performance claims
+
+⸻
+
+Coding Style
+
+Use simple, readable Python.
+
+Prefer explicit names.
+
+Prefer small modules.
+
+Prefer typed models.
+
+Prefer deterministic tests.
+
+Avoid clever abstractions.
+
+Avoid premature optimization.
+
+Keep behavior responsibilities narrow.
+
+Make graph state easy to inspect.
+
+Make examples easy to run.
+
+⸻
+
+Final Design Target
+
+By the end, the package should make this possible:
+
+An observation enters the graph.
+The memory pack extracts candidate memories.
+Each memory links back to evidence.
+Temporal and numeric facts become structured nodes.
+Contradictions and supersessions become typed relations.
+Queries create retrieval plans.
+Retrieval creates retrieval result objects.
+Answers link to the memories they used.
+Evaluations record whether memory helped.
+Different memory policies can be replayed or compared.
+
+The final result should feel native to ActiveGraph.
+
+It should show that memory is not a black-box retrieval layer.
+
+It should show memory as event-sourced, graph-structured, behavior-driven state evolution.

@@ -31,6 +31,26 @@ extraction cache → full re-extraction (~1.5h full) AND risks adding noise that
 regresses the currently-perfect strong types. Treat as a deliberate,
 user-approved experiment, not a quick fix.
 
+# Validated: interest-capture prompt fixes preference but regresses recency
+
+Hardening the extraction prompt to (a) capture revealed interests from user
+*requests* and (b) make every memory self-contained + topic-anchored + cover
+every salient entity DID fix the target preference question and took
+single-session-preference 2/3 → 3/3 on the 50-q s-slice. BUT overall stayed
+**flat at 0.94**: it broke one knowledge-update recency question (8/8 → 7/8),
+plus zero-sum churn in temporal/single-session-user.
+
+**Why:** the coverage + self-contained instruction makes each turn that mentions
+an evolving fact *restate* it. For a value that changes over time (a mortgage
+pre-approval $350k→$400k), the stale value gets restated across many turns and
+the reader picks the "more detailed / consistently referenced" old value over
+the single most-recent update. Verbose, repeated extraction amplifies stale
+values and defeats recency/knowledge-update.
+**How to apply:** if pursuing interest-capture, keep factual/numeric values
+*concise and un-restated*, or strengthen recency/supersession so the latest
+value wins regardless of repetition. Don't let "cover every entity" turn into
+"restate every background fact in every memory."
+
 # Do NOT broaden the retrieval stoplist to fix this
 
 `keyword_score` = fraction of query keywords present, and the stoplist is

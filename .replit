@@ -44,7 +44,7 @@ outputType = "console"
 
 [[workflows.workflow.tasks]]
 task = "shell.exec"
-args = "cd longmemeval-harness && ../.pythonlibs/bin/python -u -m longmemeval_harness --size small --split s --reader sonnet --run-id baseline-task7-s --limit 50 --concurrency 2 --extraction llm"
+args = "cd longmemeval-harness && ../.pythonlibs/bin/python -u -m longmemeval_harness --size small --split s --reader sonnet --run-id pref-extract-s --limit 50 --concurrency 2 --extraction llm"
 
 [agent]
 stack = "PNPM_WORKSPACE"

@@ -23,10 +23,12 @@ from activegraph_memory.tools.embeddings import (
     OpenAIEmbeddingProvider,
     set_active_provider,
 )
+from activegraph_memory.tools.extraction import set_active_extractor
 
-from .config import CACHE_DIR
+from .config import CACHE_DIR, EXTRACTION_MODEL
 from .dataset import Instance
 from .embedding_cache import CachedEmbeddingProvider
+from .extraction_cache import CachedLLMExtractor
 
 _MEMORY_TYPES = ("memory_claim", "episodic_memory", "procedural_memory")
 
@@ -61,6 +63,44 @@ def _install_embedding_provider() -> Optional[str]:
         )
     set_active_provider(_EMBEDDING_PROVIDER)
     return EMBEDDING_MODEL
+
+
+# Per-process LLM extractor (see _install_embedding_provider for the rationale).
+_EXTRACTOR: Optional[CachedLLMExtractor] = None
+
+
+def resolve_extraction_mode(mode: str) -> tuple[str, Optional[str]]:
+    """Return the extraction mode/model that will actually run, accounting for
+    the ``OPENAI_API_KEY`` fallback. ``llm`` silently degrades to
+    ``deterministic`` when no key is present, so callers (e.g. the manifest)
+    can record what truly happened instead of what was merely requested.
+    """
+    if mode == "llm" and os.environ.get("OPENAI_API_KEY"):
+        return "llm", EXTRACTION_MODEL
+    return "deterministic", None
+
+
+def _install_extractor(mode: str) -> Optional[CachedLLMExtractor]:
+    """Install the LLM extraction provider when ``mode == 'llm'`` and a real
+    OPENAI_API_KEY is present; otherwise reset the pack to its deterministic
+    heuristic. Returns the active extractor (for cache pre-warming) or None.
+    """
+    global _EXTRACTOR
+    if mode != "llm":
+        set_active_extractor(None)
+        return None
+    key = os.environ.get("OPENAI_API_KEY")
+    if not key:
+        set_active_extractor(None)
+        return None
+    if _EXTRACTOR is None:
+        _EXTRACTOR = CachedLLMExtractor(
+            api_key=key,
+            model=EXTRACTION_MODEL,
+            cache_path=CACHE_DIR / "extractions.sqlite",
+        )
+    set_active_extractor(_EXTRACTOR)
+    return _EXTRACTOR
 
 
 @dataclass
@@ -103,19 +143,25 @@ def _sorted_sessions(instance: Instance):
 
 
 def run_pack(
-    instance: Instance, settings: Optional[MemorySettings] = None
+    instance: Instance,
+    settings: Optional[MemorySettings] = None,
+    *,
+    extraction: str = "deterministic",
 ) -> EvidenceBundle:
     settings = settings or MemorySettings()
     _install_embedding_provider()
+    extractor = _install_extractor(extraction)
     g = Graph()
     rt = Runtime(g)
     rt.load_pack(pack, settings=settings)
 
     n_obs = 0
+    contents: list[str] = []
     for session in _sorted_sessions(instance):
         for turn in session.turns:
             if not turn.content:
                 continue
+            contents.append(turn.content)
             g.add_object(
                 "memory_observation",
                 {
@@ -132,6 +178,11 @@ def run_pack(
                 },
             )
             n_obs += 1
+
+    # Pre-warm the extraction cache concurrently so the per-observation behavior
+    # calls (sequential inside run_until_idle) are all cache hits.
+    if extractor is not None:
+        extractor.warm(contents)
     rt.run_until_idle()
 
     g.add_object(

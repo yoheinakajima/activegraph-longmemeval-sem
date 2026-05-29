@@ -6,6 +6,7 @@ import argparse
 import sys
 
 from .config import (
+    DEFAULT_EXTRACTION_MODE,
     DEFAULT_JUDGE_MODEL,
     DEFAULT_JUDGE_PROVIDER,
     DEFAULT_READER_PRESET,
@@ -48,6 +49,10 @@ def _build_parser() -> argparse.ArgumentParser:
                         "CPU-bound; >1 speeds up large splits, default 1)")
     p.add_argument("--download-only", action="store_true",
                    help="download the split, print its SHA-256, and exit")
+    p.add_argument("--extraction", choices=["deterministic", "llm"],
+                   default=DEFAULT_EXTRACTION_MODE,
+                   help="memory extraction: deterministic heuristic (default, "
+                        "offline) or llm (gpt-4o-mini, cached; needs OPENAI_API_KEY)")
     return p
 
 
@@ -74,6 +79,7 @@ def main(argv: list[str] | None = None) -> int:
         no_judge=args.no_judge,
         limit=args.limit,
         concurrency=args.concurrency,
+        extraction=args.extraction,
     )
     run_benchmark(cfg)
     return 0

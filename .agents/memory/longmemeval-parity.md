@@ -93,3 +93,23 @@ type) → +7.4 pts. Judge `gpt-4o-2024-08-06` (real key). By type: knowledge-upd
 69% (13), single-session-preference 33% (3), temporal-reasoning 38% (13). turn_aic_recall
 0.815, session_aic_recall 0.98. 0 errors. temporal-reasoning is now the weak spot.
 NOTE: this is the 50-q slice only; full-s strong run + Phase-2 LLM extraction not yet done.
+
+**Phase 2 — LLM memory extraction (opt-in, cached):** the pack's
+`extract_candidate_memories` behavior accepts an injected extractor via
+`set_active_extractor` (default None → deterministic 1-memory-per-observation
+heuristic, kept for offline/test determinism). Harness installs a cached
+gpt-4o-mini (temp 0, JSON) extractor behind `--extraction llm` (+ real
+OPENAI_API_KEY); manifest records requested-vs-resolved so a silent
+no-key fallback to deterministic is never mislabeled. **Durable lessons:**
+(1) pre-warm the extraction cache concurrently over ALL of a question's turns
+*before* run_until_idle — the per-observation behavior calls run sequentially,
+so cold per-call latency otherwise dominates; (2) NEVER cache an LLM failure as
+an empty result — distinguish None (transient, skip write, retry w/ backoff)
+from [] (genuine "nothing durable"), or a rate-limit blip poisons the cache
+permanently; (3) clamp extracted confidence to [0,1] before building pack
+objects (pydantic schema rejects out-of-range). **Result (50-q s-slice,
+May 2026):** overall **88%** vs the 68% strong-deterministic baseline (+20 pts),
+0 errors. multi-session 1.0, temporal-reasoning 0.77 (was 0.38 — biggest gain),
+single-session-preference still weakest (0.67). Cost: extraction is the slow
+part on a cold cache (~4 min ingest/q for ~485 turns); warm cache makes re-runs
+fast+free. Full-s Phase-2 run is a separate user-confirmed step.

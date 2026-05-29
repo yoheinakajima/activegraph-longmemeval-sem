@@ -22,7 +22,7 @@ from typing import Optional
 from activegraph_memory import MemorySettings, pack
 
 from . import __version__
-from .adapter import run_pack
+from .adapter import resolve_extraction_mode, run_pack
 from .config import (
     DEFAULT_JUDGE_MODEL,
     DEFAULT_JUDGE_PROVIDER,
@@ -55,6 +55,7 @@ class RunConfig:
     no_judge: bool = False
     limit: Optional[int] = None
     concurrency: int = 1
+    extraction: str = "deterministic"
 
     def default_run_id(self) -> str:
         return f"{self.split}-{self.size}-seed{self.seed}"
@@ -84,7 +85,7 @@ def _run_one(inst, cfg: "RunConfig") -> dict:
     }
     try:
         t0 = time.time()
-        bundle = run_pack(inst, settings)
+        bundle = run_pack(inst, settings, extraction=cfg.extraction)
         t_ingest = time.time() - t0
 
         t0 = time.time()
@@ -215,6 +216,7 @@ def run_benchmark(cfg: RunConfig) -> dict:
     )
 
     settings = MemorySettings()
+    _resolved_extraction = resolve_extraction_mode(cfg.extraction)
     started = time.time()
     resolved = {
         "reader": cfg.reader_model,
@@ -292,6 +294,11 @@ def run_benchmark(cfg: RunConfig) -> dict:
                 "requested": cfg.judge_model,
                 "resolved": resolved["judge"],
                 "enabled": not cfg.no_judge,
+            },
+            "extraction": {
+                "requested": cfg.extraction,
+                "resolved": _resolved_extraction[0],
+                "model": _resolved_extraction[1],
             },
         },
         "memory_settings": settings.model_dump(),

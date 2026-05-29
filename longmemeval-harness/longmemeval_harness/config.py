@@ -67,6 +67,12 @@ DEFAULT_JUDGE_PROVIDER = "openai"
 # OPENAI_API_KEY (see llm.py). Recorded as requested-vs-resolved per run.
 DEFAULT_JUDGE_MODEL = "gpt-4o-2024-08-06"
 
+# Phase 2 LLM memory extraction (opt-in via --extraction llm). A cheap, fast
+# snapshot at temp 0; runs on the real OpenAI API (OPENAI_API_KEY) with a
+# persistent disk cache so each unique turn is extracted once, ever.
+DEFAULT_EXTRACTION_MODE = "deterministic"  # "deterministic" | "llm"
+EXTRACTION_MODEL = "gpt-4o-mini"
+
 # Reader context budget (tiktoken estimate). Above this we truncate oldest
 # messages and flag the question as truncated.
 MAX_CONTEXT_TOKENS = 110_000

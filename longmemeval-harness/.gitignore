@@ -1,0 +1,9 @@
+# Downloaded benchmark data (pulled from HuggingFace, not vendored)
+data/
+# Per-run outputs (SQLite store, manifest, hypotheses, metrics)
+runs/
+# Python
+__pycache__/
+*.pyc
+.pytest_cache/
+*.egg-info/

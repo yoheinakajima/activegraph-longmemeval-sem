@@ -44,3 +44,19 @@ available on proxy: claude-opus-4-1 and claude-opus-4-5 (claude-opus-4 is NOT).
 gpt-4o-2024-11-20); the pack uses its own keyword/BM25 retrieval (vector
 disabled), not the paper's dense embeddings — but that retrieval IS the system
 under test, not a knob.
+
+**Result — semantic pack on cleaned `s` (n=500, run-id `full-s-sonnet`, May 2026):**
+Overall QA accuracy **60.6%** (303/500), 0 errors/0 pack_errors. Reader
+`claude-sonnet-4-5-20250929`, judge `gpt-4o-2024-11-20`, data sha256
+`d6f21ea9d60a0d56…`. By type: single-session-assistant 96.4%, single-session-user
+82.9%, knowledge-update 75.6%, temporal-reasoning 56.4%, single-session-preference
+36.7%, multi-session 34.6%. Abstention 83.3% (25/30), answerable 59.1%.
+Deterministic retrieval sidecar: turn_hit 50.2%, session_hit 77.4%. Mean reader
+context ~7.5k tokens (NOT the paper's ~2.5k budget — different system). This is the
+deferred semantic-memory experiment, NOT a repro of the paper's 85.6% substrate
+number. Weakest on cross-session synthesis (multi-session, preference).
+
+**Speed lever:** ingest is CPU-bound (deterministic, no LLM, ~21s/q); harness has a
+`--concurrency N` flag (ProcessPoolExecutor, default 1) — N=3 on the 4-core box gave
+~3x throughput with byte-identical per-question results (fresh Graph/Runtime/pack,
+temp-0). Workspace sleeps when idle, so a long run only advances while awake.

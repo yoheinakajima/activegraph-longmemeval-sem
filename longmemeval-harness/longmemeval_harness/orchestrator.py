@@ -159,6 +159,19 @@ def _run_one(inst, cfg: "RunConfig") -> dict:
         }
 
 
+def _error_record(inst, exc: Exception, prefix: str = "") -> dict:
+    return {
+        "question_id": inst.question_id,
+        "question_type": inst.question_type,
+        "is_abstention": inst.is_abstention,
+        "question": inst.question,
+        "question_date": inst.question_date,
+        "gold_answer": inst.answer,
+        "status": "error",
+        "error": f"{prefix}{exc}\n{traceback.format_exc()}",
+    }
+
+
 def _log_record(record: dict, n: int, total: int) -> None:
     flag = "" if record.get("status") == "error" else (
         "" if record.get("judge_correct") is None
@@ -220,24 +233,24 @@ def run_benchmark(cfg: RunConfig) -> dict:
     workers = max(1, cfg.concurrency)
     if workers > 1 and total > 1:
         print(f"[run] concurrency={workers} (process pool)")
+        n = 0
         with ProcessPoolExecutor(max_workers=workers) as ex:
-            futs = {ex.submit(_run_one, by_id[qid], cfg): qid for qid in todo}
-            for n, fut in enumerate(as_completed(futs), 1):
+            futs = {}
+            for qid in todo:
+                try:
+                    futs[ex.submit(_run_one, by_id[qid], cfg)] = qid
+                except Exception as exc:  # noqa: BLE001 - submit/pickle failure
+                    n += 1
+                    record = _error_record(by_id[qid], exc, "submit failed: ")
+                    _absorb(record)
+                    _log_record(record, n, total)
+            for fut in as_completed(futs):
                 qid = futs[fut]
                 try:
                     record = fut.result()
                 except Exception as exc:  # noqa: BLE001 - worker crash/pickle
-                    inst = by_id[qid]
-                    record = {
-                        "question_id": qid,
-                        "question_type": inst.question_type,
-                        "is_abstention": inst.is_abstention,
-                        "question": inst.question,
-                        "question_date": inst.question_date,
-                        "gold_answer": inst.answer,
-                        "status": "error",
-                        "error": f"worker failed: {exc}\n{traceback.format_exc()}",
-                    }
+                    record = _error_record(by_id[qid], exc, "worker failed: ")
+                n += 1
                 _absorb(record)
                 _log_record(record, n, total)
     else:

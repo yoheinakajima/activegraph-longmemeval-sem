@@ -43,6 +43,9 @@ def _build_parser() -> argparse.ArgumentParser:
                    help="skip the LLM judge (retrieval sidecar + reader only)")
     p.add_argument("--limit", type=int, default=None,
                    help="cap number of sampled questions (debugging)")
+    p.add_argument("--concurrency", type=int, default=1,
+                   help="parallel worker processes (deterministic ingest is "
+                        "CPU-bound; >1 speeds up large splits, default 1)")
     p.add_argument("--download-only", action="store_true",
                    help="download the split, print its SHA-256, and exit")
     return p
@@ -70,6 +73,7 @@ def main(argv: list[str] | None = None) -> int:
         seed=args.seed,
         no_judge=args.no_judge,
         limit=args.limit,
+        concurrency=args.concurrency,
     )
     run_benchmark(cfg)
     return 0

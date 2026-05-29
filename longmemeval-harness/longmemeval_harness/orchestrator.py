@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import time
 import traceback
+from concurrent.futures import ProcessPoolExecutor, as_completed
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -53,6 +54,7 @@ class RunConfig:
     seed: int = SAMPLE_SEED
     no_judge: bool = False
     limit: Optional[int] = None
+    concurrency: int = 1
 
     def default_run_id(self) -> str:
         return f"{self.split}-{self.size}-seed{self.seed}"
@@ -60,6 +62,117 @@ class RunConfig:
 
 def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+def _run_one(inst, cfg: "RunConfig") -> dict:
+    """Full per-question pipeline (pack -> reader -> score -> judge).
+
+    Self-contained so it can run in a worker process: it builds its own
+    ``MemorySettings`` and ``LLMClient`` and returns a fully-populated record
+    dict (status ``done``) or an error record (status ``error``). Per-question
+    results are independent of concurrency (deterministic ingest, temp-0 LLMs).
+    """
+    settings = MemorySettings()
+    client = LLMClient()
+    base = {
+        "question_id": inst.question_id,
+        "question_type": inst.question_type,
+        "is_abstention": inst.is_abstention,
+        "question": inst.question,
+        "question_date": inst.question_date,
+        "gold_answer": inst.answer,
+    }
+    try:
+        t0 = time.time()
+        bundle = run_pack(inst, settings)
+        t_ingest = time.time() - t0
+
+        t0 = time.time()
+        reader = run_reader(
+            client, cfg.reader_provider, cfg.reader_model, inst, bundle
+        )
+        t_read = time.time() - t0
+
+        sc = score_retrieval(inst, bundle)
+
+        judge_fields: dict = {
+            "judge_requested_model": None,
+            "judge_resolved_model": None,
+            "judge_correct": None,
+            "judge_raw": None,
+            "judge_total_tokens": None,
+        }
+        t_judge = 0.0
+        if not cfg.no_judge:
+            t0 = time.time()
+            jr = run_judge(
+                client, cfg.judge_provider, cfg.judge_model, inst, reader.hypothesis
+            )
+            t_judge = time.time() - t0
+            judge_fields = {
+                "judge_requested_model": jr.requested_model,
+                "judge_resolved_model": jr.resolved_model,
+                "judge_correct": jr.correct,
+                "judge_raw": jr.raw,
+                "judge_total_tokens": jr.total_tokens,
+            }
+
+        return {
+            **base,
+            "status": "done",
+            "error": None,
+            "ingest_n_obs": bundle.n_observations,
+            "ingest_n_claims": bundle.n_claims,
+            "pack_errors": bundle.pack_errors,
+            "retrieved_object_ids": bundle.retrieved_object_ids,
+            "used_memory_ids": bundle.used_memory_ids,
+            "evidence_ids": bundle.evidence_ids,
+            "context_turn_ids": bundle.context_turn_ids,
+            "context_session_ids": bundle.context_session_ids,
+            "retrieval_summary": bundle.retrieval_summary,
+            "assembled_context": bundle.assembled_context,
+            "hypothesis": reader.hypothesis,
+            "reader_requested_model": reader.requested_model,
+            "reader_resolved_model": reader.resolved_model,
+            "reader_prompt_tokens": reader.prompt_tokens,
+            "reader_completion_tokens": reader.completion_tokens,
+            "reader_total_tokens": reader.total_tokens,
+            "context_tokens": reader.context_tokens,
+            "truncated": reader.truncated,
+            "turn_recall": sc.turn_recall,
+            "turn_hit": sc.turn_hit,
+            "session_recall": sc.session_recall,
+            "session_hit": sc.session_hit,
+            "n_gold_turns": sc.n_gold_turns,
+            "n_gold_sessions": sc.n_gold_sessions,
+            **judge_fields,
+            "t_ingest": t_ingest,
+            "t_read": t_read,
+            "t_judge": t_judge,
+            "t_total": t_ingest + t_read + t_judge,
+        }
+    except Exception as exc:  # noqa: BLE001 - record + continue
+        return {
+            **base,
+            "status": "error",
+            "error": f"{exc}\n{traceback.format_exc()}",
+        }
+
+
+def _log_record(record: dict, n: int, total: int) -> None:
+    flag = "" if record.get("status") == "error" else (
+        "" if record.get("judge_correct") is None
+        else ("OK" if record.get("judge_correct") else "X ")
+    )
+    if record.get("status") == "error":
+        print(f"[{n}/{total}] {record['question_id']} ERROR: "
+              f"{(record.get('error') or '').splitlines()[0]}")
+    else:
+        print(
+            f"[{n}/{total}] {record['question_id']} {record['question_type']} "
+            f"{flag} turn_hit={record.get('turn_hit')} "
+            f"({record.get('t_ingest', 0.0):.1f}s ingest)"
+        )
 
 
 def run_benchmark(cfg: RunConfig) -> dict:
@@ -89,111 +202,49 @@ def run_benchmark(cfg: RunConfig) -> dict:
     )
 
     settings = MemorySettings()
-    client = LLMClient()
     started = time.time()
     resolved = {
         "reader": cfg.reader_model,
         "judge": cfg.judge_model,
     }
 
-    for n, qid in enumerate(todo, 1):
-        inst = by_id[qid]
-        base = {
-            "question_id": qid,
-            "question_type": inst.question_type,
-            "is_abstention": inst.is_abstention,
-            "question": inst.question,
-            "question_date": inst.question_date,
-            "gold_answer": inst.answer,
-        }
-        try:
-            t0 = time.time()
-            bundle = run_pack(inst, settings)
-            t_ingest = time.time() - t0
+    def _absorb(record: dict) -> None:
+        # Capture resolved model ids (any successful record will do).
+        if record.get("reader_resolved_model"):
+            resolved["reader"] = record["reader_resolved_model"]
+        if record.get("judge_resolved_model"):
+            resolved["judge"] = record["judge_resolved_model"]
+        store.upsert(record)
 
-            t0 = time.time()
-            reader = run_reader(
-                client, cfg.reader_provider, cfg.reader_model, inst, bundle
-            )
-            t_read = time.time() - t0
-            resolved["reader"] = reader.resolved_model
-
-            sc = score_retrieval(inst, bundle)
-
-            judge_fields: dict = {
-                "judge_requested_model": None,
-                "judge_resolved_model": None,
-                "judge_correct": None,
-                "judge_raw": None,
-                "judge_total_tokens": None,
-            }
-            t_judge = 0.0
-            if not cfg.no_judge:
-                t0 = time.time()
-                jr = run_judge(
-                    client, cfg.judge_provider, cfg.judge_model, inst, reader.hypothesis
-                )
-                t_judge = time.time() - t0
-                resolved["judge"] = jr.resolved_model
-                judge_fields = {
-                    "judge_requested_model": jr.requested_model,
-                    "judge_resolved_model": jr.resolved_model,
-                    "judge_correct": jr.correct,
-                    "judge_raw": jr.raw,
-                    "judge_total_tokens": jr.total_tokens,
-                }
-
-            record = {
-                **base,
-                "status": "done",
-                "error": None,
-                "ingest_n_obs": bundle.n_observations,
-                "ingest_n_claims": bundle.n_claims,
-                "pack_errors": bundle.pack_errors,
-                "retrieved_object_ids": bundle.retrieved_object_ids,
-                "used_memory_ids": bundle.used_memory_ids,
-                "evidence_ids": bundle.evidence_ids,
-                "context_turn_ids": bundle.context_turn_ids,
-                "context_session_ids": bundle.context_session_ids,
-                "retrieval_summary": bundle.retrieval_summary,
-                "assembled_context": bundle.assembled_context,
-                "hypothesis": reader.hypothesis,
-                "reader_requested_model": reader.requested_model,
-                "reader_resolved_model": reader.resolved_model,
-                "reader_prompt_tokens": reader.prompt_tokens,
-                "reader_completion_tokens": reader.completion_tokens,
-                "reader_total_tokens": reader.total_tokens,
-                "context_tokens": reader.context_tokens,
-                "truncated": reader.truncated,
-                "turn_recall": sc.turn_recall,
-                "turn_hit": sc.turn_hit,
-                "session_recall": sc.session_recall,
-                "session_hit": sc.session_hit,
-                "n_gold_turns": sc.n_gold_turns,
-                "n_gold_sessions": sc.n_gold_sessions,
-                **judge_fields,
-                "t_ingest": t_ingest,
-                "t_read": t_read,
-                "t_judge": t_judge,
-                "t_total": t_ingest + t_read + t_judge,
-            }
-            store.upsert(record)
-            flag = "" if record["judge_correct"] is None else (
-                "OK" if record["judge_correct"] else "X "
-            )
-            print(
-                f"[{n}/{len(todo)}] {qid} {inst.question_type} {flag} "
-                f"turn_hit={sc.turn_hit} ({t_ingest:.1f}s ingest)"
-            )
-        except Exception as exc:  # noqa: BLE001 - record + continue
-            store.upsert(
-                {
-                    **base,
-                    "status": "error",
-                    "error": f"{exc}\n{traceback.format_exc()}",
-                }
-            )
-            print(f"[{n}/{len(todo)}] {qid} ERROR: {exc}")
+    total = len(todo)
+    workers = max(1, cfg.concurrency)
+    if workers > 1 and total > 1:
+        print(f"[run] concurrency={workers} (process pool)")
+        with ProcessPoolExecutor(max_workers=workers) as ex:
+            futs = {ex.submit(_run_one, by_id[qid], cfg): qid for qid in todo}
+            for n, fut in enumerate(as_completed(futs), 1):
+                qid = futs[fut]
+                try:
+                    record = fut.result()
+                except Exception as exc:  # noqa: BLE001 - worker crash/pickle
+                    inst = by_id[qid]
+                    record = {
+                        "question_id": qid,
+                        "question_type": inst.question_type,
+                        "is_abstention": inst.is_abstention,
+                        "question": inst.question,
+                        "question_date": inst.question_date,
+                        "gold_answer": inst.answer,
+                        "status": "error",
+                        "error": f"worker failed: {exc}\n{traceback.format_exc()}",
+                    }
+                _absorb(record)
+                _log_record(record, n, total)
+    else:
+        for n, qid in enumerate(todo, 1):
+            record = _run_one(by_id[qid], cfg)
+            _absorb(record)
+            _log_record(record, n, total)
 
     wall = time.time() - started
     records = store.all_records()

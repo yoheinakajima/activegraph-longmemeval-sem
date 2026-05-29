@@ -93,3 +93,47 @@ reordering. Promising directions not yet tried — a *learned/stronger* reranker
 (supersession/entity-disambiguation written into the graph) rather than at read
 time; or telling the reader to commit rather than hedge. Adding more retrieval
 breadth is a dead end here.
+
+## Follow-up: cached strong-LLM reranker on the FLAT path (50-q LongMemEval-S)
+
+Tested the "stronger reranker" lever flagged above, the right way: a cached
+**listwise gpt-4o-mini** reranker (`enable_rerank`, default OFF) applied to the
+flat path's top-40 candidates, keeping the most answer-relevant `rerank_keep`.
+Pluggable + offline-inert exactly like the agentic controller (harness installs
+`CachedLLMReranker` via `set_active_reranker`; pack ships no provider). Cache is
+keyed on (question, candidate-set, prompt-version) and is independent of
+`rerank_keep`, so a keep-sweep reuses the same LLM calls.
+
+| flat config                          | overall | vs base |
+|--------------------------------------|---------|---------|
+| flat baseline (no rerank)            | 0.94    | —       |
+| rerank, keep=40 (pure reorder)       | 0.92    | −0.02   |
+| rerank, keep=20                      | 0.88    | −0.06   |
+
+**A strong LLM reranker still does NOT beat 0.94 — it's net-negative even with
+zero trimming.** keep=40 keeps every candidate (pool is top-40) so it is pure
+reordering, and it already regresses. Per type, reorder *helped*
+knowledge-update (0.875→1.0) but *broke* single-session-preference (1.0→0.667)
+and temporal (0.923→0.846); trimming (keep=20) deepens both losses.
+
+**Why reordering alone hurts — the adapter's session-expansion coupling:** the
+harness adapter expands ALL turns of a session into reader context only when
+`0 < distinct_retrieved_session_ids <= 2` (so single-session-preference/short
+sessions show the actual stated fact). Reranking changes *which* memories — and
+thus which session_ids — survive into the result, so it silently flips that ≤2
+trigger on/off. A read-time reorder of the candidate list is therefore NOT a
+side-effect-free precision tweak in this harness: it perturbs context assembly.
+This is the same family of failure as the earlier deterministic reranker
+(reader hedging on preference) — confirmed now with a strong LLM ranker, so the
+ranker quality was never the issue.
+
+**Verdict / shipped state:** reranker built, flag-gated, **default OFF**; flat
+0.94 stays the product default. Post-hoc reranking/trimming of the flat
+candidate set is a **dead end** regardless of ranker strength. The remaining
+untried precision levers are all at INGEST/structure time (LLM consolidation +
+supersession, LLM numeric/entity attribution writing distractor-suppression
+into the graph) or in the reader (commit-don't-hedge / REQUIRED_DATA
+self-correction, reported as an explicitly NON-parity track). Validating the
+ingest-time LLM passes needs a cold, non-cacheable per-memory LLM pass over the
+whole corpus (tens of thousands of sequential calls), which the cacheable warm
+50-q harness loop cannot pre-warm — budget that separately before attempting.

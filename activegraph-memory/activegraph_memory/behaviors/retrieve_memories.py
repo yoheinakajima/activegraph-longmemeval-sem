@@ -18,6 +18,7 @@ from activegraph_memory.constants import (
 )
 from activegraph_memory.settings import MemorySettings
 from activegraph_memory.tools.keyword_search import keyword_search_fn
+from activegraph_memory.tools.reranker import get_active_reranker
 from activegraph_memory.tools.retrieval import (
     DefaultAgenticController,
     RetrievalTools,
@@ -163,6 +164,41 @@ def retrieve_memories(event, graph, ctx, *, settings: MemorySettings):
     # Order: score desc, then id asc for determinism
     ranked = sorted(hits_by_id.items(), key=lambda kv: (-kv[1], kv[0]))
     retrieved_ids = [oid for oid, _ in ranked[: settings.retrieval_limit]]
+
+    # Optional strong rerank: hand the ranked candidates to a pluggable provider
+    # (the harness's cached LLM reranker) to reorder + trim to the most
+    # answer-relevant ``rerank_keep`` facts, suppressing distractors before they
+    # reach the reader. Inert unless ``enable_rerank`` AND a provider is
+    # installed. The provider boundary is untrusted, so we keep only returned ids
+    # that were candidates, de-duplicated, preserving the provider's order.
+    if settings.enable_rerank and retrieved_ids:
+        reranker = get_active_reranker()
+        if reranker is not None:
+            obj_by_id = {o.id: o for o in objects}
+            candidates = [
+                (oid, str(((obj_by_id.get(oid).data if obj_by_id.get(oid) else {}) or {}).get("content", "")))
+                for oid in retrieved_ids
+            ]
+            id_set = set(retrieved_ids)
+            kept: list[str] = []
+            try:
+                # The whole normalize path is inside the guard: the provider may
+                # raise OR return a non-iterable (None/scalar/object). Either way
+                # we fall back to the original top-N rather than breaking the
+                # behavior with a schema violation.
+                ordered = reranker.rerank(question, candidates, settings.rerank_keep)
+                seen_r: set[str] = set()
+                for oid in ordered:
+                    if oid in id_set and oid not in seen_r:
+                        seen_r.add(oid)
+                        kept.append(oid)
+            except Exception:  # noqa: BLE001 — never let rerank break retrieval
+                kept = []
+            retrieved_ids = (
+                kept[: settings.rerank_keep]
+                if kept
+                else retrieved_ids[: settings.rerank_keep]
+            )
 
     # Detect missing data: if plan flagged required_data, check whether any
     # hit carries that signal.

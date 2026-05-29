@@ -22,7 +22,7 @@ from typing import Optional
 from activegraph_memory import MemorySettings, pack
 
 from . import __version__
-from .adapter import resolve_extraction_mode, run_pack
+from .adapter import resolve_extraction_mode, resolve_rerank_mode, run_pack
 from .config import (
     DEFAULT_JUDGE_MODEL,
     DEFAULT_JUDGE_PROVIDER,
@@ -58,6 +58,8 @@ class RunConfig:
     extraction: str = "deterministic"
     retrieval_strategy: str = "flat"  # "flat" | "agentic"
     concept_graph: bool = False
+    rerank: str = "off"  # "off" | "llm"
+    rerank_keep: int = 12
 
     def default_run_id(self) -> str:
         return f"{self.split}-{self.size}-seed{self.seed}"
@@ -66,10 +68,14 @@ class RunConfig:
 def build_settings(cfg: "RunConfig") -> MemorySettings:
     """MemorySettings for a run. The agentic retrieval path needs the concept
     graph populated during ingest, so selecting it implies concept-graph on
-    (unless explicitly requested separately)."""
+    (unless explicitly requested separately). The LLM reranker is gated by both
+    this flag and an installed provider (set in ``run_pack`` from the same
+    ``--rerank`` choice), so flag-off OR no-provider keeps the flat baseline."""
     return MemorySettings(
         retrieval_strategy=cfg.retrieval_strategy,
         enable_concept_graph=cfg.concept_graph or cfg.retrieval_strategy == "agentic",
+        enable_rerank=cfg.rerank == "llm",
+        rerank_keep=cfg.rerank_keep,
     )
 
 
@@ -97,7 +103,7 @@ def _run_one(inst, cfg: "RunConfig") -> dict:
     }
     try:
         t0 = time.time()
-        bundle = run_pack(inst, settings, extraction=cfg.extraction)
+        bundle = run_pack(inst, settings, extraction=cfg.extraction, rerank=cfg.rerank)
         t_ingest = time.time() - t0
 
         t0 = time.time()
@@ -229,6 +235,7 @@ def run_benchmark(cfg: RunConfig) -> dict:
 
     settings = build_settings(cfg)
     _resolved_extraction = resolve_extraction_mode(cfg.extraction)
+    _resolved_rerank = resolve_rerank_mode(cfg.rerank)
     started = time.time()
     resolved = {
         "reader": cfg.reader_model,
@@ -311,6 +318,11 @@ def run_benchmark(cfg: RunConfig) -> dict:
                 "requested": cfg.extraction,
                 "resolved": _resolved_extraction[0],
                 "model": _resolved_extraction[1],
+            },
+            "rerank": {
+                "requested": cfg.rerank,
+                "resolved": _resolved_rerank[0],
+                "model": _resolved_rerank[1],
             },
         },
         "memory_settings": settings.model_dump(),

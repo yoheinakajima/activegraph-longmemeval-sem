@@ -96,5 +96,18 @@ class MemorySettings(BaseModel):
     agentic_rerank_keep_ratio: float = Field(default=0.0, ge=0.0, le=1.0)
     agentic_rerank_limit: int = Field(default=40, ge=1)
 
+    # Strong pluggable reranker (flat path). The flat keyword+vector score is a
+    # weak relevance proxy, so the path keeps a large pool and distractors reach
+    # the reader — the precision bottleneck the prior experiment isolated. When
+    # ``enable_rerank`` is on AND a rerank provider is installed (the harness's
+    # cached LLM reranker), the flat path hands its ranked candidate facts to the
+    # provider, which reorders and trims to the most answer-relevant ``rerank_keep``.
+    # This is distinct from the deterministic ``agentic_*`` rerank above (which
+    # backfired): a genuinely strong, content-aware reranker rather than entity
+    # overlap. OFF by default; with the flag off OR no provider installed the flat
+    # path is byte-for-byte unchanged, so the 0.94 baseline and offline tests hold.
+    enable_rerank: bool = False
+    rerank_keep: int = Field(default=12, ge=1)
+
     # Policy tag — used as a label for diff/fork comparisons
     default_policy_name: str = "default"

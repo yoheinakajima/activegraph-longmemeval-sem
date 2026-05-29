@@ -60,6 +60,11 @@ def _build_parser() -> argparse.ArgumentParser:
     p.add_argument("--concept-graph", action="store_true",
                    help="build the entity/topic concept graph during ingest "
                         "(auto-enabled by --retrieval-strategy agentic)")
+    p.add_argument("--rerank", choices=["off", "llm"], default="off",
+                   help="strong LLM reranker over the flat path's candidate "
+                        "facts (cached; needs OPENAI_API_KEY). off = baseline.")
+    p.add_argument("--rerank-keep", type=int, default=12,
+                   help="max facts kept after rerank (only with --rerank llm)")
     return p
 
 
@@ -89,6 +94,8 @@ def main(argv: list[str] | None = None) -> int:
         extraction=args.extraction,
         retrieval_strategy=args.retrieval_strategy,
         concept_graph=args.concept_graph,
+        rerank=args.rerank,
+        rerank_keep=args.rerank_keep,
     )
     run_benchmark(cfg)
     return 0

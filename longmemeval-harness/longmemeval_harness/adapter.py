@@ -24,16 +24,22 @@ from activegraph_memory.tools.embeddings import (
     set_active_provider,
 )
 from activegraph_memory.tools.extraction import set_active_extractor
+from activegraph_memory.tools.reranker import set_active_reranker
 
 from .config import CACHE_DIR, EXTRACTION_MODEL
 from .dataset import Instance
 from .embedding_cache import CachedEmbeddingProvider
 from .extraction_cache import CachedLLMExtractor
+from .rerank_cache import CachedLLMReranker
 
 _MEMORY_TYPES = ("memory_claim", "episodic_memory", "procedural_memory")
 
 # Same embedding model the original activegraph-longmemeval substrate test used.
 EMBEDDING_MODEL = "text-embedding-3-small"
+
+# Cheap, fast model for the optional LLM reranker (opt-in via --rerank llm).
+# Cached on disk so each (question, candidate-set) is reranked once, ever.
+RERANK_MODEL = "gpt-4o-mini"
 
 # Per-process cached provider. ``run_pack`` is called once per question, but each
 # ProcessPoolExecutor worker handles many questions; building a fresh provider
@@ -103,6 +109,42 @@ def _install_extractor(mode: str) -> Optional[CachedLLMExtractor]:
     return _EXTRACTOR
 
 
+# Per-process LLM reranker (see _install_embedding_provider for the rationale).
+_RERANKER: Optional[CachedLLMReranker] = None
+
+
+def resolve_rerank_mode(mode: str) -> tuple[str, Optional[str]]:
+    """What the reranker will actually do, accounting for the key fallback.
+    ``llm`` degrades to ``off`` when no OPENAI_API_KEY is present."""
+    if mode == "llm" and os.environ.get("OPENAI_API_KEY"):
+        return "llm", RERANK_MODEL
+    return "off", None
+
+
+def _install_reranker(mode: str) -> Optional[CachedLLMReranker]:
+    """Install the LLM reranker when ``mode == 'llm'`` and a real OPENAI_API_KEY
+    is present; otherwise reset the pack to no-rerank. The pack only consults a
+    reranker when ``settings.enable_rerank`` is also on, so this and the settings
+    flag must agree (the orchestrator sets both from the same ``--rerank`` flag).
+    """
+    global _RERANKER
+    if mode != "llm":
+        set_active_reranker(None)
+        return None
+    key = os.environ.get("OPENAI_API_KEY")
+    if not key:
+        set_active_reranker(None)
+        return None
+    if _RERANKER is None:
+        _RERANKER = CachedLLMReranker(
+            api_key=key,
+            model=RERANK_MODEL,
+            cache_path=CACHE_DIR / "reranks.sqlite",
+        )
+    set_active_reranker(_RERANKER)
+    return _RERANKER
+
+
 @dataclass
 class EvidenceBundle:
     assembled_context: str
@@ -147,10 +189,12 @@ def run_pack(
     settings: Optional[MemorySettings] = None,
     *,
     extraction: str = "deterministic",
+    rerank: str = "off",
 ) -> EvidenceBundle:
     settings = settings or MemorySettings()
     _install_embedding_provider()
     extractor = _install_extractor(extraction)
+    _install_reranker(rerank)
     g = Graph()
     rt = Runtime(g)
     rt.load_pack(pack, settings=settings)

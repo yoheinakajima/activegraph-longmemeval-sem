@@ -1,5 +1,5 @@
 - [Python LLM via Replit AI integrations](python-ai-integrations.md) — call OpenAI/Anthropic Python SDKs against AI_INTEGRATIONS_*_BASE_URL/API_KEY env vars; skills are JS-only but env vars work cross-language.
 - [activegraph-memory pack driver](activegraph-pack-driver.md) — how to drive the frozen memory pack and trace provenance for evidence/turn mapping.
 - [LongMemEval paper parity](longmemeval-parity.md) — the blog tested the substrate (NOT the semantic pack); exact reader/judge/split knobs; gpt-4o-2024-08-06 unavailable on Replit proxy.
-- [Agentic concept-graph retrieval experiment](agentic-retrieval-experiment.md) — best agentic 0.90 < flat 0.94; bottleneck is PRECISION not recall — more strategies/reranking/trimming all hurt; extras shipped flag-gated OFF by default.
+- [Agentic + rerank retrieval experiment](agentic-retrieval-experiment.md) — flat 0.94 stays default; agentic 0.90 and read-time rerank (even strong LLM, no trim) regress; bottleneck is PRECISION not recall, must be fixed at ingest not read-time; all extras shipped flag-gated OFF.
 - [LongMemEval preference retrieval](longmemeval-preference-retrieval.md) — failing preference q is an extraction-gap (implied-by-request); broadening the retrieval stoplist regresses 0.94→0.90 — keep stoplist minimal.

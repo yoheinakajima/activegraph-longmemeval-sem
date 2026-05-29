@@ -20,6 +20,10 @@ author = "agent"
 task = "workflow.run"
 args = "LongMemEval full-s run"
 
+[[workflows.workflow.tasks]]
+task = "workflow.run"
+args = "LongMemEval stop-fix validation"
+
 [[workflows.workflow]]
 name = "LongMemEval full-s run"
 author = "agent"
@@ -30,6 +34,17 @@ outputType = "console"
 [[workflows.workflow.tasks]]
 task = "shell.exec"
 args = "cd longmemeval-harness && ../.pythonlibs/bin/python -u -m longmemeval_harness --size full --split s --reader sonnet --run-id full-s-sonnet --concurrency 3"
+
+[[workflows.workflow]]
+name = "LongMemEval stop-fix validation"
+author = "agent"
+
+[workflows.workflow.metadata]
+outputType = "console"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "cd longmemeval-harness && ../.pythonlibs/bin/python -u -m longmemeval_harness --size small --split s --reader sonnet --run-id baseline-task7-s --limit 50 --concurrency 2 --extraction llm"
 
 [agent]
 stack = "PNPM_WORKSPACE"

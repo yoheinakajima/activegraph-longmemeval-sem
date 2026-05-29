@@ -13,6 +13,7 @@ from activegraph_memory import MemorySettings, pack
 from activegraph_memory.constants import CONCEPT_TYPE, MEMORY_TYPES
 from activegraph_memory.tools.retrieval import (
     DefaultAgenticController,
+    FactHit,
     RetrievalDecision,
     RetrievalTools,
     get_active_retrieval_controller,
@@ -171,3 +172,105 @@ def test_default_controller_unit_concept_then_fallback():
     assert decision.fact_ids
     assert decision.iterations >= 1
     assert 0.0 <= decision.confidence <= 1.0
+
+
+def test_question_entity_match_finds_concept():
+    g, rt = _runtime(enable_concept_graph=True)
+    g.add_object("memory_observation",
+                 {"actor": "user", "content": "Yohei lives in Tokyo.", "source": "chat"})
+    rt.run_until_idle()
+    tools = RetrievalTools(g.all_objects(), g.all_relations(), exclude_statuses=[])
+
+    # "Tokyo" is an entity in both the memory and the question -> exact match.
+    hits = tools.search_concepts_by_entities("What city is Tokyo near?")
+    assert any(h.name.lower() == "tokyo" for h in hits)
+    # An unrelated question with no shared entity matches nothing.
+    assert tools.search_concepts_by_entities("What is the weather?") == []
+
+
+def test_rerank_trims_to_limit_and_orders_by_relevance():
+    # Many same-entity facts; the rerank/trim must cap the pool and put the
+    # most relevant fact first (the "too much info" guard).
+    g, rt = _runtime(enable_concept_graph=True, retrieval_strategy="agentic")
+    contents = [
+        "Acme released 500 copies of the debut album worldwide.",
+        "Acme signed poster from the debut album hangs on the wall.",
+        "Acme debut album was recorded in Berlin.",
+        "Acme debut album cover is blue.",
+        "Acme debut album tour started in May.",
+    ]
+    for c in contents:
+        g.add_object("memory_observation", {"actor": "user", "content": c, "source": "chat"})
+    rt.run_until_idle()
+
+    tools = RetrievalTools(g.all_objects(), g.all_relations(), exclude_statuses=[])
+    settings = MemorySettings(retrieval_strategy="agentic", agentic_rerank_limit=2)
+    decision = DefaultAgenticController().retrieve(
+        "How many copies of the debut album were released worldwide?", tools, settings
+    )
+    assert len(decision.fact_ids) <= 2
+    top = {o.id: o for o in g.all_objects()}[decision.fact_ids[0]]
+    assert "500 copies" in (top.data or {}).get("content", "")
+
+
+def test_strategy_flags_recover_fact_independently():
+    g, rt = _runtime(enable_concept_graph=True)
+    g.add_object("memory_observation",
+                 {"actor": "user", "content": "Yohei lives in Tokyo.", "source": "chat"})
+    rt.run_until_idle()
+    tools = RetrievalTools(g.all_objects(), g.all_relations(), exclude_statuses=[])
+    q = "Where does Yohei live?"
+
+    # Default config (entity-match + rerank OFF): concept vector search + direct
+    # fallback recover the fact.
+    assert DefaultAgenticController().retrieve(q, tools, MemorySettings()).fact_ids
+
+    # Entity match explicitly ON: still recovers it (adds a high-precision route).
+    with_entity = MemorySettings(
+        retrieval_strategy="agentic", agentic_match_question_entities=True
+    )
+    assert DefaultAgenticController().retrieve(q, tools, with_entity).fact_ids
+
+    # Direct fallback off: the concept routes still recover it.
+    no_fallback = MemorySettings(
+        retrieval_strategy="agentic", agentic_direct_fact_fallback=False
+    )
+    assert DefaultAgenticController().retrieve(q, tools, no_fallback).fact_ids
+
+
+def test_default_off_reproduces_prior_order_and_cap():
+    # With both extras OFF (defaults), _select must reproduce the prior
+    # controller's deterministic order -- (-score, object_id) -- and cap by
+    # agentic_max_facts, independent of any recency/overlap reranking.
+    tools = RetrievalTools([], [], exclude_statuses=[])
+    pool = {
+        "mem_3": FactHit("mem_3", 0.5, "memory_observation", "c"),
+        "mem_1": FactHit("mem_1", 0.9, "memory_observation", "a"),
+        "mem_2": FactHit("mem_2", 0.5, "memory_observation", "b"),
+    }
+    defaults = MemorySettings()
+    assert defaults.agentic_entity_overlap_weight == 0.0
+    assert defaults.agentic_rerank_keep_ratio == 0.0
+
+    ranked = DefaultAgenticController._rank("q", pool, tools, defaults)
+    # Prior sort: highest score first, ties broken by object_id ascending.
+    assert [h.object_id for h in ranked] == ["mem_1", "mem_2", "mem_3"]
+
+    # Output capped at agentic_max_facts (not rerank_limit).
+    capped = MemorySettings(agentic_max_facts=2, agentic_rerank_limit=40)
+    selected = DefaultAgenticController._select("q", pool, tools, capped)
+    assert [h.object_id for h in selected] == ["mem_1", "mem_2"]
+
+
+def test_cap_precedence_uses_min_of_max_facts_and_rerank_limit():
+    tools = RetrievalTools([], [], exclude_statuses=[])
+    pool = {
+        f"mem_{i}": FactHit(f"mem_{i}", 1.0 - i / 10.0, "memory_observation", str(i))
+        for i in range(6)
+    }
+    # rerank_limit tighter than max_facts -> rerank_limit wins.
+    s1 = MemorySettings(agentic_max_facts=40, agentic_rerank_limit=2)
+    assert len(DefaultAgenticController._select("q", pool, tools, s1)) == 2
+    # max_facts tighter than rerank_limit -> max_facts wins.
+    s2 = MemorySettings(agentic_max_facts=3, agentic_rerank_limit=40)
+    assert len(DefaultAgenticController._select("q", pool, tools, s2)) == 3

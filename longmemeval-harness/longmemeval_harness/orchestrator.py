@@ -56,9 +56,21 @@ class RunConfig:
     limit: Optional[int] = None
     concurrency: int = 1
     extraction: str = "deterministic"
+    retrieval_strategy: str = "flat"  # "flat" | "agentic"
+    concept_graph: bool = False
 
     def default_run_id(self) -> str:
         return f"{self.split}-{self.size}-seed{self.seed}"
+
+
+def build_settings(cfg: "RunConfig") -> MemorySettings:
+    """MemorySettings for a run. The agentic retrieval path needs the concept
+    graph populated during ingest, so selecting it implies concept-graph on
+    (unless explicitly requested separately)."""
+    return MemorySettings(
+        retrieval_strategy=cfg.retrieval_strategy,
+        enable_concept_graph=cfg.concept_graph or cfg.retrieval_strategy == "agentic",
+    )
 
 
 def _now_iso() -> str:
@@ -73,7 +85,7 @@ def _run_one(inst, cfg: "RunConfig") -> dict:
     dict (status ``done``) or an error record (status ``error``). Per-question
     results are independent of concurrency (deterministic ingest, temp-0 LLMs).
     """
-    settings = MemorySettings()
+    settings = build_settings(cfg)
     client = LLMClient()
     base = {
         "question_id": inst.question_id,
@@ -215,7 +227,7 @@ def run_benchmark(cfg: RunConfig) -> dict:
         f"  todo={len(todo)}"
     )
 
-    settings = MemorySettings()
+    settings = build_settings(cfg)
     _resolved_extraction = resolve_extraction_mode(cfg.extraction)
     started = time.time()
     resolved = {

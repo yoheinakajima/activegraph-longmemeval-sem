@@ -1,8 +1,10 @@
-"""Relation types for the memory pack. 12 relations per docs/brief/relation_types.md.
+"""Relation types for the memory pack.
 
-(``about_entity`` and ``same_entity_as`` are deferred — see brief; ActiveGraph
-does not have a generic entity object type, and the pack does not introduce one
-in v0.1.)
+The 12 core lifecycle relations, plus the concept-graph edges ``about_entity``
+(a memory is about a canonical entity/topic) and ``same_entity_as`` (two
+concept nodes denote the same thing). The concept edges are only created when
+``MemorySettings.enable_concept_graph`` is set; they back the agentic
+retrieval path.
 """
 
 from __future__ import annotations
@@ -82,5 +84,17 @@ RELATION_TYPES = [
         name="governed_by_policy",
         target_types=("memory_policy",),
         description="An operation was governed by a memory policy.",
+    ),
+    RelationType(
+        name="about_entity",
+        source_types=_MEMORY_TYPES,
+        target_types=("memory_concept",),
+        description="A memory is about a canonical entity or topic.",
+    ),
+    RelationType(
+        name="same_entity_as",
+        source_types=("memory_concept",),
+        target_types=("memory_concept",),
+        description="Two concept nodes denote the same entity (alias link).",
     ),
 ]

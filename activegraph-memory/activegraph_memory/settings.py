@@ -45,5 +45,26 @@ class MemorySettings(BaseModel):
     # Answering
     allow_general_knowledge_in_answers: bool = False
 
+    # Concept graph (entity/topic layer). OFF by default so the flat baseline
+    # and offline tests are unchanged. When on, extraction links each memory to
+    # canonical ``memory_concept`` nodes via ``about_entity``.
+    enable_concept_graph: bool = False
+    max_concepts_per_memory: int = Field(default=6, ge=1)
+    # Secondary dedup: merge concept surface forms whose embeddings are very
+    # similar. OFF by default — exact normalized-name match is the primary,
+    # deterministic, cost-free dedup. Turning this on embeds every concept name.
+    concept_embedding_dedup: bool = False
+    concept_dedup_similarity: float = Field(default=0.92, ge=0.0, le=1.0)
+
+    # Retrieval strategy. "flat" = current keyword+vector blend (default).
+    # "agentic" = pluggable controller loop: vector-search concepts -> gather
+    # linked facts -> self-assess -> fall back to direct fact search -> iterate
+    # until confident or budget exhausted. Inert unless set to "agentic".
+    retrieval_strategy: Literal["flat", "agentic"] = "flat"
+    agentic_max_iterations: int = Field(default=4, ge=1)
+    agentic_confidence_threshold: float = Field(default=0.75, ge=0.0, le=1.0)
+    agentic_max_facts: int = Field(default=40, ge=1)
+    agentic_concept_search_limit: int = Field(default=10, ge=1)
+
     # Policy tag — used as a label for diff/fork comparisons
     default_policy_name: str = "default"

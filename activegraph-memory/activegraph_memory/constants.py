@@ -4,6 +4,10 @@ from __future__ import annotations
 
 MEMORY_TYPES = ("memory_claim", "episodic_memory", "procedural_memory")
 
+# Concept-graph node type (entity/topic). Deliberately NOT in MEMORY_TYPES, so
+# flat keyword/vector retrieval and the reader's context assembly ignore it.
+CONCEPT_TYPE = "memory_concept"
+
 STATUS_ACTIVE = "active"
 STATUS_SUPERSEDED = "superseded"
 STATUS_ARCHIVED = "archived"

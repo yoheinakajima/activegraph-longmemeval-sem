@@ -53,6 +53,13 @@ def _build_parser() -> argparse.ArgumentParser:
                    default=DEFAULT_EXTRACTION_MODE,
                    help="memory extraction: deterministic heuristic (default, "
                         "offline) or llm (gpt-4o-mini, cached; needs OPENAI_API_KEY)")
+    p.add_argument("--retrieval-strategy", choices=["flat", "agentic"],
+                   default="flat",
+                   help="retrieval: flat keyword+vector blend (default) or "
+                        "agentic concept-graph loop (implies --concept-graph)")
+    p.add_argument("--concept-graph", action="store_true",
+                   help="build the entity/topic concept graph during ingest "
+                        "(auto-enabled by --retrieval-strategy agentic)")
     return p
 
 
@@ -80,6 +87,8 @@ def main(argv: list[str] | None = None) -> int:
         limit=args.limit,
         concurrency=args.concurrency,
         extraction=args.extraction,
+        retrieval_strategy=args.retrieval_strategy,
+        concept_graph=args.concept_graph,
     )
     run_benchmark(cfg)
     return 0

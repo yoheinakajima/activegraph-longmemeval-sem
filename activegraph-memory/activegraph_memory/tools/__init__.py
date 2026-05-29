@@ -33,6 +33,24 @@ from activegraph_memory.tools.scoring import (
     keyword_score,
     cosine_similarity,
 )
+from activegraph_memory.tools.concepts import (
+    ConceptExtractor,
+    concepts_for_memory,
+    deterministic_concepts,
+    get_active_concept_extractor,
+    normalize_concept,
+    set_active_concept_extractor,
+)
+from activegraph_memory.tools.retrieval import (
+    ConceptHit,
+    DefaultAgenticController,
+    FactHit,
+    RetrievalController,
+    RetrievalDecision,
+    RetrievalTools,
+    get_active_retrieval_controller,
+    set_active_retrieval_controller,
+)
 
 TOOLS = [keyword_search, vector_search]
 
@@ -54,4 +72,18 @@ __all__ = [
     "extract_keywords",
     "keyword_score",
     "cosine_similarity",
+    "ConceptExtractor",
+    "concepts_for_memory",
+    "deterministic_concepts",
+    "normalize_concept",
+    "set_active_concept_extractor",
+    "get_active_concept_extractor",
+    "ConceptHit",
+    "FactHit",
+    "RetrievalDecision",
+    "RetrievalTools",
+    "RetrievalController",
+    "DefaultAgenticController",
+    "set_active_retrieval_controller",
+    "get_active_retrieval_controller",
 ]

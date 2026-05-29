@@ -30,6 +30,7 @@ class ExtractedMemory:
     content: str
     confidence: float = 0.85
     reason: Optional[str] = None
+    concepts: list[str] = field(default_factory=list)
     metadata: dict[str, Any] = field(default_factory=dict)
 
 

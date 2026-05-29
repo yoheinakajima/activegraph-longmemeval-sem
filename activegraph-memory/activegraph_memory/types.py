@@ -215,6 +215,25 @@ class MemoryArchiveRequest(BaseModel):
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 
+class MemoryConcept(BaseModel):
+    """A canonical entity or topic that memories are *about*.
+
+    Concepts form a lightweight semantic index over memories: each memory
+    links to one or more concepts via ``about_entity``. Concepts can then be
+    vector-searched to find relevant memories indirectly (the agentic
+    retrieval path), surfacing facts that share an entity even when their
+    wording is far from the query. ``normalized`` is the dedup key; surface
+    forms collected over time are kept in ``aliases``.
+    """
+
+    name: str
+    kind: Literal["entity", "topic"] = "entity"
+    normalized: Optional[str] = None
+    aliases: list[str] = Field(default_factory=list)
+    mention_count: int = 1
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
 # ---------------------------------------------------------------- registry
 
 
@@ -249,4 +268,6 @@ OBJECT_TYPES = [
                description="Manual request to forget a memory."),
     ObjectType(name="memory_archive_request", schema=MemoryArchiveRequest,
                description="Manual request to archive a memory."),
+    ObjectType(name="memory_concept", schema=MemoryConcept,
+               description="A canonical entity or topic memories are about."),
 ]

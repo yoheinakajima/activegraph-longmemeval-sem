@@ -4,7 +4,7 @@ description: What the ActiveGraph LongMemEval-S blog/paper actually tested vs. w
 ---
 The blog "Evidence Compilation Before Semantic Memory: ActiveGraph on
 LongMemEval-S" (activegraph.ai) + repo `yoheinakajima/activegraph-longmemeval`
-(release `v0.1-paper-longmemeval-s`, commit 3fb54a4) is the "first analysis".
+(paper release tag `v0.1-paper-longmemeval-s`) is the "first analysis".
 
 **Biggest parity fact — different system under test.** The paper measured the
 deterministic *substrate* (turn-node graph, NO LLM at ingest; retrieval via
@@ -29,7 +29,18 @@ only `gpt-4o` (resolves `gpt-4o-2024-11-20`). So judge snapshot parity is
 impossible on the proxy; document requested-vs-resolved in the manifest. Paper
 says judge-snapshot contribution is ~±1 pt.
 
-**Remaining non-parity:** reader prompt is a close approximation, not the
-paper's byte-identical template (the verbatim prompt lives in the repo's lib/);
-the pack uses its own keyword/BM25 retrieval (vector disabled), not the paper's
-dense embeddings — but that retrieval IS the system under test, not a knob.
+**Reader prompt parity (DONE):** the paper's shared template lives in
+`src/activegraph_lme/cli.py` (`SYSTEM_PROMPT` + `format_user`), NOT in the
+reader/ files (the reader just takes system+user strings). Our reader now uses
+the byte-identical system prompt and `format_user` layout
+("Conversation history:\n{ctx}\n\nToday's date: {date}\nQuestion: {q}\nAnswer:").
+
+**Reader model switch:** `--reader {sonnet,opus}` preset (config `READER_PRESETS`):
+sonnet=claude-sonnet-4-5 (default, paper-aligned), opus=claude-opus-4-5
+(resolves claude-opus-4-5-20251101). `--reader-model <id>` overrides. Opus ids
+available on proxy: claude-opus-4-1 and claude-opus-4-5 (claude-opus-4 is NOT).
+
+**Remaining non-parity:** judge snapshot (gpt-4o-2024-08-06 unavailable; using
+gpt-4o-2024-11-20); the pack uses its own keyword/BM25 retrieval (vector
+disabled), not the paper's dense embeddings — but that retrieval IS the system
+under test, not a knob.

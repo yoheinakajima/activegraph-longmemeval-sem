@@ -8,8 +8,9 @@ import sys
 from .config import (
     DEFAULT_JUDGE_MODEL,
     DEFAULT_JUDGE_PROVIDER,
-    DEFAULT_READER_MODEL,
+    DEFAULT_READER_PRESET,
     DEFAULT_READER_PROVIDER,
+    READER_PRESETS,
     SAMPLE_SEED,
     SPLITS,
     TIER_SIZES,
@@ -31,7 +32,11 @@ def _build_parser() -> argparse.ArgumentParser:
                    help="override run id (default: <split>-<size>-seed<seed>)")
     p.add_argument("--seed", type=int, default=SAMPLE_SEED)
     p.add_argument("--reader-provider", default=DEFAULT_READER_PROVIDER)
-    p.add_argument("--reader-model", default=DEFAULT_READER_MODEL)
+    p.add_argument("--reader", choices=list(READER_PRESETS),
+                   default=DEFAULT_READER_PRESET,
+                   help="named reader preset (sonnet=paper default, opus=stronger)")
+    p.add_argument("--reader-model", default=None,
+                   help="explicit reader model id; overrides --reader")
     p.add_argument("--judge-provider", default=DEFAULT_JUDGE_PROVIDER)
     p.add_argument("--judge-model", default=DEFAULT_JUDGE_MODEL)
     p.add_argument("--no-judge", action="store_true",
@@ -52,12 +57,14 @@ def main(argv: list[str] | None = None) -> int:
         print(f"{path.name}  sha256={sha256_of(path)}")
         return 0
 
+    reader_model = args.reader_model or READER_PRESETS[args.reader]
+
     cfg = RunConfig(
         size=args.size,
         split=args.split,
         run_id=args.run_id,
         reader_provider=args.reader_provider,
-        reader_model=args.reader_model,
+        reader_model=reader_model,
         judge_provider=args.judge_provider,
         judge_model=args.judge_model,
         seed=args.seed,

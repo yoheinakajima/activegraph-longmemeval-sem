@@ -16,12 +16,15 @@ from .adapter import EvidenceBundle
 from .dataset import Instance
 from .llm import LLMClient
 
+# Verbatim from the ActiveGraph LongMemEval-S paper harness
+# (yoheinakajima/activegraph-longmemeval @ v0.1-paper-longmemeval-s,
+# src/activegraph_lme/cli.py) so the reader is a controlled constant across
+# the paper's substrate run and this semantic-pack run.
 READER_SYSTEM = (
-    "You are a careful personal-memory assistant. Answer the user's "
-    "question using ONLY the evidence provided (remembered facts and past "
-    "messages). Do not use outside knowledge and do not guess. If the "
-    "evidence does not contain enough information to answer, reply exactly: "
-    "I don't know. Answer directly and concisely."
+    "You are a helpful assistant answering a user's question about prior "
+    "conversations between the user and an assistant. Use ONLY the provided "
+    "conversation history. If the history does not contain enough information "
+    "to answer, say you don't know. Be concise."
 )
 
 _ENCODER = None
@@ -67,10 +70,13 @@ def _truncate_context(context: str) -> tuple[str, bool]:
 
 
 def build_user_prompt(instance: Instance, context: str) -> str:
+    # Verbatim layout from the paper harness `format_user` (cli.py): the pack's
+    # assembled evidence bundle is placed where the paper places conversation
+    # history, keeping the prompt a controlled constant between the two runs.
     qdate = instance.question_date or "unknown"
     return (
-        f"Current date: {qdate}\n\n"
-        f"{context}\n\n"
+        f"Conversation history:\n{context}\n\n"
+        f"Today's date: {qdate}\n"
         f"Question: {instance.question}\n"
         f"Answer:"
     )

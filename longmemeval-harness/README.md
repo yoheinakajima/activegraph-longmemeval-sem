@@ -64,10 +64,20 @@ aligned to the paper:
 | split (headline) | `s` (n=500)                     | `--split s --size full`       | ✅ |
 | AIC convention | exclude 30 abstentions, McNemar  | same                          | ✅ |
 | retrieval     | dense embeddings (`text-embedding-3-small`) over turn nodes | the **pack's own** retrieval (this is the system under test, not a knob) | n/a |
-| reader prompt | shared template (verbatim in repo) | close approximation (same tool-free / "answer only from evidence" / "I don't know" discipline), not byte-identical | ⚠️ |
+| reader prompt | shared template (in repo `cli.py`) | **byte-identical** system + user template | ✅ |
 
 The manifest records every model **requested vs. resolved**, so all parity
 gaps are auditable per run.
+
+**Reader model switch.** The reader is selectable via a named preset so trying a
+stronger model is a one-flag change:
+
+- `--reader sonnet` (default) → `claude-sonnet-4-5` (paper-aligned)
+- `--reader opus` → `claude-opus-4-5` (stronger)
+- `--reader-model <id>` overrides with any explicit model id.
+
+Everything else (prompt, temperature 0, tool-free, max_tokens, judge, metrics)
+stays fixed, so a sonnet-vs-opus comparison isolates reader strength.
 
 ## Install
 
@@ -135,7 +145,8 @@ and representative.
 | `--run-id`            | override the run id (default `<split>-<size>-seed<seed>`)   |
 | `--seed`              | sampling seed (default 42)                                  |
 | `--reader-provider`   | `anthropic` (default) or `openai`                           |
-| `--reader-model`      | reader model id                                             |
+| `--reader`            | reader preset: `sonnet` (default, paper) or `opus` (stronger) |
+| `--reader-model`      | explicit reader model id (overrides `--reader`)            |
 | `--judge-provider`    | `openai` (default) or `anthropic`                           |
 | `--judge-model`       | judge model id                                              |
 | `--no-judge`          | skip the LLM judge (retrieval sidecar + reader only)       |

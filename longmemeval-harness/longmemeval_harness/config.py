@@ -46,7 +46,17 @@ QUESTION_TYPES = [
 # (recorded as requested-vs-resolved in every manifest). Both run at temp 0;
 # the paper notes judge-snapshot contribution is ~+/-1 pt.
 DEFAULT_READER_PROVIDER = "anthropic"
-DEFAULT_READER_MODEL = "claude-sonnet-4-5"
+
+# Named reader presets so swapping to a stronger model is a one-flag change
+# (`--reader opus`). All are Anthropic; resolved dated snapshots are recorded
+# per run in the manifest. Verified available on the Replit proxy May 2026.
+READER_PRESETS = {
+    "sonnet": "claude-sonnet-4-5",  # paper-aligned default -> claude-sonnet-4-5-20250929
+    "opus": "claude-opus-4-5",      # stronger -> claude-opus-4-5-20251101
+}
+DEFAULT_READER_PRESET = "sonnet"
+DEFAULT_READER_MODEL = READER_PRESETS[DEFAULT_READER_PRESET]
+
 DEFAULT_JUDGE_PROVIDER = "openai"
 DEFAULT_JUDGE_MODEL = "gpt-4o"
 

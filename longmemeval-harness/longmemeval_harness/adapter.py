@@ -158,6 +158,12 @@ def run_pack(
     n_obs = 0
     contents: list[str] = []
     for session in _sorted_sessions(instance):
+        # Anchor every turn to its session timestamp. This lets the pack's
+        # resolve_temporal_refs behavior turn relative mentions ("yesterday",
+        # "last week") into absolute dates, and propagates occurred_at onto any
+        # episodic memories extracted from the turn — both surfaced to the reader
+        # below so it does not have to do relative-date arithmetic itself.
+        anchor = session.date_obj.isoformat() if session.date_obj else None
         for turn in session.turns:
             if not turn.content:
                 continue
@@ -169,6 +175,8 @@ def run_pack(
                     "content": turn.content,
                     "source": "longmemeval",
                     "source_id": f"{turn.session_id}::{turn.turn_index}",
+                    "occurred_at": anchor,
+                    "observed_at": anchor,
                     "metadata": {
                         "session_id": turn.session_id,
                         "turn_index": turn.turn_index,
@@ -193,11 +201,18 @@ def run_pack(
 
     objects = {o.id: o for o in g.all_objects()}
     derived: dict[str, set[str]] = {}
+    # source object id -> temporal_ref object ids (relative/explicit dates the
+    # pack already resolved against each turn's anchor).
+    temporal_by_src: dict[str, list[str]] = {}
     for rel in g.all_relations():
         if rel.type == "derived_from":
             src, tgt = _rel_ends(rel)
             if src and tgt:
                 derived.setdefault(src, set()).add(tgt)
+        elif rel.type == "has_temporal_ref":
+            src, tgt = _rel_ends(rel)
+            if src and tgt:
+                temporal_by_src.setdefault(src, []).append(tgt)
 
     adapter_warnings: list[str] = []
 
@@ -262,16 +277,64 @@ def run_pack(
             context_session_ids.add(sid)
 
     # ---- assemble the evidence bundle text the reader will consume ----
+    def _date_only(v: Any) -> str:
+        # Temporal/occurred_at values are ISO datetimes; keep just the date.
+        return str(v).split("T", 1)[0] if v else ""
+
+    def _resolved_dates(src_id: str) -> list[str]:
+        """Absolute dates the pack resolved for a turn's relative time words,
+        formatted like 'yesterday = 2022-03-20', so the reader does not have to
+        do the relative-date arithmetic that causes temporal-reasoning misses."""
+        out: list[str] = []
+        seen: set[str] = set()
+        for ref_id in temporal_by_src.get(src_id, []):
+            ref = objects.get(ref_id)
+            if ref is None:
+                continue
+            rd = ref.data or {}
+            if rd.get("resolution_method") in (None, "unresolved"):
+                continue
+            day = _date_only(rd.get("resolved_at"))
+            text = (rd.get("text") or "").strip()
+            if not day or not text or text.lower() == day:
+                continue
+            if rd.get("resolution_method") == "duration_start":
+                label = f"{text} = since {day}"
+            else:
+                label = f"{text} = {day}"
+            if label not in seen:
+                seen.add(label)
+                out.append(label)
+        return out
+
     fact_lines: list[str] = []
     for mid in dict.fromkeys(used_ids + retrieved_ids):
         obj = objects.get(mid)
         if obj and obj.type in _MEMORY_TYPES:
             content = (obj.data.get("content") or "").strip()
             if content:
-                fact_lines.append(f"- {content}")
+                when = _date_only(obj.data.get("occurred_at")) if obj.type == "episodic_memory" else ""
+                fact_lines.append(f"- [{when}] {content}" if when else f"- {content}")
+
+    # The provenance walk surfaces only the turns behind retrieved memories, so a
+    # session can be "hit" while its answer-bearing turn is missing (turn_hit=0,
+    # common on single-session-preference). When evidence concentrates in one or
+    # two short sessions, include all of their turns so the reader sees the actual
+    # stated preference/fact. Bounded so multi-session contexts are never bloated.
+    display_obs: set[str] = set(obs_ids)
+    if 0 < len(context_session_ids) <= 2:
+        expanded = set(obs_ids)
+        for oid, obj in objects.items():
+            if obj.type != "memory_observation":
+                continue
+            md = obj.data.get("metadata", {}) or {}
+            if md.get("session_id") in context_session_ids:
+                expanded.add(oid)
+        if len(expanded) <= 40:  # sessions average ~10 turns; cap protects tokens
+            display_obs = expanded
 
     msg_lines: list[str] = []
-    for oid in sorted(obs_ids, key=_id_num):
+    for oid in sorted(display_obs, key=_id_num):
         obj = objects.get(oid)
         if obj is None:
             continue
@@ -279,7 +342,9 @@ def run_pack(
         date = md.get("session_date") or ""
         actor = obj.data.get("actor") or md.get("role") or ""
         content = (obj.data.get("content") or "").strip()
-        msg_lines.append(f"[{date}] {actor}: {content}")
+        resolved = _resolved_dates(oid)
+        suffix = f"  (dates: {'; '.join(resolved)})" if resolved else ""
+        msg_lines.append(f"[{date}] {actor}: {content}{suffix}")
 
     parts: list[str] = []
     if fact_lines:

@@ -108,26 +108,137 @@ _MONTHS = ("january", "february", "march", "april", "may", "june", "july",
 _RELATIVE = {
     "today": 0, "yesterday": -1, "tomorrow": 1,
     "last week": -7, "next week": 7,
+    "a week ago": -7, "an hour ago": 0, "the other day": -1,
 }
+
+# "two weeks ago", "3 days ago", "a month ago", "last month", "last year".
+_AGO_RE = re.compile(
+    r"\b(\d{1,3}|a|an|one|two|three|four|five|six|seven|eight|nine|ten)\s+"
+    r"(day|week|month|year)s?\s+ago\b",
+    re.IGNORECASE,
+)
+_LAST_NEXT_RE = re.compile(
+    r"\b(last|next)\s+(month|year)\b", re.IGNORECASE
+)
+# Ongoing duration: "for six weeks now", "for about three months". Resolves to
+# the START of the activity (anchor - N units) so the reader can compute how
+# long an activity had been going at the time of a later dated event.
+_DURATION_RE = re.compile(
+    r"\bfor\s+(?:about\s+|around\s+|almost\s+|over\s+|nearly\s+)?"
+    r"(\d{1,3}|a|an|one|two|three|four|five|six|seven|eight|nine|ten)\s+"
+    r"(day|week|month|year)s?\b",
+    re.IGNORECASE,
+)
 
 
 def find_temporal_refs(text: str) -> list[dict[str, Any]]:
     """Return raw mentions: [{'text': ..., 'kind': 'iso'|'month'|'relative'}]."""
     found: list[dict[str, Any]] = []
+    seen: set[str] = set()
+
+    def _add(t: str, kind: str) -> None:
+        key = (t.lower(), kind)
+        if key not in seen:
+            seen.add(key)
+            found.append({"text": t, "kind": kind})
+
     low = (text or "").lower()
     for m in _DATE_ISO.finditer(text or ""):
-        found.append({"text": m.group(0), "kind": "iso"})
+        _add(m.group(0), "iso")
+    # Spans consumed by the richer "N units ago" / "last month" patterns so the
+    # fixed-phrase loop below does not double-count (e.g. "a week ago").
+    for m in _AGO_RE.finditer(text or ""):
+        _add(m.group(0), "relative")
+    for m in _LAST_NEXT_RE.finditer(text or ""):
+        _add(m.group(0), "relative")
+    for m in _DURATION_RE.finditer(text or ""):
+        _add(m.group(0), "duration")
     for phrase in _RELATIVE:
         if phrase in low:
-            found.append({"text": phrase, "kind": "relative"})
+            _add(phrase, "relative")
     # Month-day style: "May 26", "may 26"
     month_re = re.compile(
         r"\b(" + "|".join(_MONTHS) + r")\s+(\d{1,2})\b",
         re.IGNORECASE,
     )
     for m in month_re.finditer(text or ""):
-        found.append({"text": m.group(0), "kind": "month_day"})
+        _add(m.group(0), "month_day")
     return found
+
+
+_WORD_NUMS = {"a": 1, "an": 1, "one": 1, "two": 2, "three": 3, "four": 4,
+              "five": 5, "six": 6, "seven": 7, "eight": 8, "nine": 9, "ten": 10}
+
+
+def _shift_months(dt: datetime, months: int) -> datetime:
+    """Add (or subtract) calendar months, clamping the day to month length."""
+    total = dt.month - 1 + months
+    year = dt.year + total // 12
+    month = total % 12 + 1
+    # last valid day of the target month
+    if month == 12:
+        nxt = datetime(year + 1, 1, 1)
+    else:
+        nxt = datetime(year, month + 1, 1)
+    last_day = (nxt - timedelta(days=1)).day
+    return dt.replace(year=year, month=month, day=min(dt.day, last_day))
+
+
+def _parse_qty(qty_raw: str) -> Optional[int]:
+    n = _WORD_NUMS.get(qty_raw, None)
+    if n is None:
+        try:
+            n = int(qty_raw)
+        except ValueError:
+            n = None
+    return n
+
+
+def _subtract_units(anchor: datetime, n: int, unit: str) -> Optional[datetime]:
+    if unit == "day":
+        return anchor - timedelta(days=n)
+    if unit == "week":
+        return anchor - timedelta(weeks=n)
+    if unit == "month":
+        return _shift_months(anchor, -n)
+    if unit == "year":
+        return _shift_months(anchor, -12 * n)
+    return None
+
+
+def _resolve_duration_start(low: str, anchor: datetime) -> Optional[datetime]:
+    """Resolve an ongoing-duration phrase ("for six weeks") to the activity's
+    start date (anchor - N units)."""
+    m = _DURATION_RE.match(low) or _DURATION_RE.search(low)
+    if not m:
+        return None
+    n = _parse_qty(m.group(1).lower())
+    if n is None:
+        return None
+    return _subtract_units(anchor, n, m.group(2).lower())
+
+
+def _resolve_relative(low: str, anchor: datetime) -> Optional[datetime]:
+    """Resolve a lowercased relative phrase against ``anchor``. Returns None
+    when the phrase carries no usable offset."""
+    if low in _RELATIVE:
+        return anchor + timedelta(days=_RELATIVE[low])
+    m = _AGO_RE.match(low) or _AGO_RE.search(low)
+    if m:
+        n = _parse_qty(m.group(1).lower())
+        if n is not None:
+            resolved = _subtract_units(anchor, n, m.group(2).lower())
+            if resolved is not None:
+                return resolved
+    m = _LAST_NEXT_RE.match(low) or _LAST_NEXT_RE.search(low)
+    if m:
+        direction, unit = m.group(1).lower(), m.group(2).lower()
+        sign = -1 if direction == "last" else 1
+        if unit == "month":
+            return _shift_months(anchor, sign)
+        if unit == "year":
+            return _shift_months(anchor, sign * 12)
+    return None
 
 
 def resolve_temporal(mention: dict[str, Any],
@@ -147,13 +258,22 @@ def resolve_temporal(mention: dict[str, Any],
         except ValueError:
             pass
     if kind == "relative" and anchor is not None:
-        delta = _RELATIVE.get(text.lower())
-        if delta is not None:
+        resolved = _resolve_relative(text.lower(), anchor)
+        if resolved is not None:
             return {
-                "resolved_at": anchor + timedelta(days=delta),
+                "resolved_at": resolved,
                 "anchor": anchor.date().isoformat(),
                 "resolution_method": "relative_to_observation",
                 "confidence": 0.9,
+            }
+    if kind == "duration" and anchor is not None:
+        resolved = _resolve_duration_start(text.lower(), anchor)
+        if resolved is not None:
+            return {
+                "resolved_at": resolved,
+                "anchor": anchor.date().isoformat(),
+                "resolution_method": "duration_start",
+                "confidence": 0.8,
             }
     return {
         "resolved_at": None,

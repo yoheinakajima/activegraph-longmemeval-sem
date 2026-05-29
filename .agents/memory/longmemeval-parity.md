@@ -113,3 +113,25 @@ May 2026):** overall **88%** vs the 68% strong-deterministic baseline (+20 pts),
 single-session-preference still weakest (0.67). Cost: extraction is the slow
 part on a cold cache (~4 min ingest/q for ~485 turns); warm cache makes re-runs
 fast+free. Full-s Phase-2 run is a separate user-confirmed step.
+
+**Phase-2 weak-type tuning (50-q s-slice, May 2026):** targeted the two weakest
+types (temporal-reasoning, single-session-preference) via PACK/adapter only — the
+reader prompt is a deliberately frozen controlled constant (substrate↔pack parity),
+so it is OFF-LIMITS. **Durable lessons:** (1) the temporal misses were NOT retrieval
+(turn_hit=1) — the frozen reader simply restates a salient duration ("for six weeks")
+instead of subtracting; surfacing absolute dates next to the message lets it compute.
+(2) the high-value lever was resolving ongoing-duration phrases ("for N weeks/months
+now", "for about three months") to a START date (anchor − N) and rendering it as
+"<phrase> = since <date>", so questions of the form "how long had I been doing X when
+event Y" become start→event subtraction. (3) GOTCHA: adding a new
+`resolution_method` value silently fails unless it is added to the `TemporalRef`
+Literal in types.py — the behavior throws ValidationError and the ref never surfaces
+(symptom: resolution works in isolation but "= since" count is 0 in assembled
+context). **Result:** overall 0.88→0.94, temporal-reasoning 0.769→0.923 (12/13;
+guitar→"four weeks", bird→"two months" both flipped), knowledge-update 0.875→1.0,
+ALL strong types unchanged (multi-session/ssa 1.0, ssu 0.857). single-session-preference
+stayed 0.667 (n=3): the 1 failure is a deep retrieval recall miss (turn_hit=0, gold
+preference turn never surfaced among 21 retrieved sessions) — not safely fixable from
+the pack without risking the perfect strong types. Runs: baseline `phase2-llm-s`,
+final `task7-v3-s`. (`task7-v2-s` was a void run — duration refs silently failed the
+Literal validation, so it equaled v1/baseline on temporal.)

@@ -149,6 +149,7 @@ class TemporalRef(BaseModel):
         "relative_to_observation",
         "relative_to_event",
         "relative_to_benchmark_now",
+        "duration_start",
         "unresolved",
     ] = "unresolved"
     confidence: float = Field(default=1.0, ge=0.0, le=1.0)

@@ -36,10 +36,38 @@ discipline). Only the **reader** and the **judge** use LLMs, via
 Replit-managed AI integrations (no API keys required; usage is billed to
 your Replit credits):
 
-- **Reader** — Anthropic `claude-sonnet-4-6` (temperature 0, tool-free).
+- **Reader** — Anthropic `claude-sonnet-4-5` (temperature 0, tool-free), matching the paper harness.
 - **Judge** — OpenAI `gpt-4o` (the LongMemEval judging convention).
 
 Both are configurable (see flags below).
+
+### Parity with the ActiveGraph LongMemEval-S paper
+
+The original result lives in
+[`yoheinakajima/activegraph-longmemeval`](https://github.com/yoheinakajima/activegraph-longmemeval)
+(release `v0.1-paper-longmemeval-s`) and its
+[blog write-up](https://activegraph.ai/blog/evidence-compilation-before-semantic-memory-longmemeval).
+**That paper measured the deterministic *substrate* ("evidence compilation
+*before* semantic memory") — turn-node graphs with embedding/lexical retrieval
+and no LLM at ingest. This harness measures the *semantic memory pack*, which
+the paper explicitly names as the follow-up experiment it does not run.** So
+this is the next experiment in that line, not a reproduction of the paper's
+85.6% number.
+
+To keep the two directly comparable, the controllable evaluation knobs are
+aligned to the paper:
+
+| knob          | paper (`v0.1-paper-longmemeval-s`) | here                          | parity |
+|---------------|------------------------------------|-------------------------------|--------|
+| reader        | `claude-sonnet-4-5`, temp 0, tool-free, max_tokens 1024 | same | ✅ |
+| judge         | `gpt-4o-2024-08-06`, temp 0        | `gpt-4o` → `gpt-4o-2024-11-20` | ⚠️ snapshot unavailable on Replit proxy; both temp 0 (paper: ~±1 pt) |
+| split (headline) | `s` (n=500)                     | `--split s --size full`       | ✅ |
+| AIC convention | exclude 30 abstentions, McNemar  | same                          | ✅ |
+| retrieval     | dense embeddings (`text-embedding-3-small`) over turn nodes | the **pack's own** retrieval (this is the system under test, not a knob) | n/a |
+| reader prompt | shared template (verbatim in repo) | close approximation (same tool-free / "answer only from evidence" / "I don't know" discipline), not byte-identical | ⚠️ |
+
+The manifest records every model **requested vs. resolved**, so all parity
+gaps are auditable per run.
 
 ## Install
 

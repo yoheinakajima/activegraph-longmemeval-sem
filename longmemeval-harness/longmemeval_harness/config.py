@@ -36,15 +36,22 @@ QUESTION_TYPES = [
 ]
 
 # ---------------------------------------------------------------- models
-# Same model families as the blog/result, via Replit-managed AI integrations.
-# Reader: Anthropic Sonnet. Judge: GPT-4o (the LongMemEval judging convention).
+# Aligned with the ActiveGraph LongMemEval-S paper harness
+# (yoheinakajima/activegraph-longmemeval, release v0.1-paper-longmemeval-s)
+# for cross-comparability, via Replit-managed AI integrations:
+#   Reader  — claude-sonnet-4-5, temperature 0, tool-free  (paper value)
+#   Judge   — gpt-4o, temperature 0                         (LongMemEval convention)
+# Parity caveat: the paper pinned judge snapshot gpt-4o-2024-08-06, which is
+# NOT exposed by the Replit proxy; "gpt-4o" here resolves to gpt-4o-2024-11-20
+# (recorded as requested-vs-resolved in every manifest). Both run at temp 0;
+# the paper notes judge-snapshot contribution is ~+/-1 pt.
 DEFAULT_READER_PROVIDER = "anthropic"
-DEFAULT_READER_MODEL = "claude-sonnet-4-6"
+DEFAULT_READER_MODEL = "claude-sonnet-4-5"
 DEFAULT_JUDGE_PROVIDER = "openai"
 DEFAULT_JUDGE_MODEL = "gpt-4o"
 
 # Reader context budget (tiktoken estimate). Above this we truncate oldest
 # messages and flag the question as truncated.
 MAX_CONTEXT_TOKENS = 110_000
-READER_MAX_OUTPUT_TOKENS = 512
+READER_MAX_OUTPUT_TOKENS = 1024  # paper reader max_tokens
 JUDGE_MAX_OUTPUT_TOKENS = 16

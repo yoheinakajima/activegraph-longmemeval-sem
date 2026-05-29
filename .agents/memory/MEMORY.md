@@ -1,2 +1,3 @@
 - [Python LLM via Replit AI integrations](python-ai-integrations.md) — call OpenAI/Anthropic Python SDKs against AI_INTEGRATIONS_*_BASE_URL/API_KEY env vars; skills are JS-only but env vars work cross-language.
 - [activegraph-memory pack driver](activegraph-pack-driver.md) — how to drive the frozen memory pack and trace provenance for evidence/turn mapping.
+- [LongMemEval paper parity](longmemeval-parity.md) — the blog tested the substrate (NOT the semantic pack); exact reader/judge/split knobs; gpt-4o-2024-08-06 unavailable on Replit proxy.

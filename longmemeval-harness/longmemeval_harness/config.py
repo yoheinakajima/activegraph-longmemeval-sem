@@ -8,6 +8,9 @@ from pathlib import Path
 HARNESS_ROOT = Path(__file__).resolve().parent.parent
 DATA_DIR = HARNESS_ROOT / "data"
 RUNS_DIR = HARNESS_ROOT / "runs"
+# Persistent, cross-run embedding cache (shared by all workers). Keyed by
+# (model, text) so repeated turn text is embedded exactly once, ever.
+CACHE_DIR = HARNESS_ROOT / ".cache"
 
 # ---------------------------------------------------------------- dataset
 # LongMemEval cleaned release on HuggingFace (no GitHub / no vendoring).
@@ -58,7 +61,11 @@ DEFAULT_READER_PRESET = "sonnet"
 DEFAULT_READER_MODEL = READER_PRESETS[DEFAULT_READER_PRESET]
 
 DEFAULT_JUDGE_PROVIDER = "openai"
-DEFAULT_JUDGE_MODEL = "gpt-4o"
+# Judge pinned to the exact snapshot the original activegraph-longmemeval
+# substrate test used. This snapshot is NOT exposed by the Replit AI proxy, so
+# the judge runs against the real OpenAI API using the user-provided
+# OPENAI_API_KEY (see llm.py). Recorded as requested-vs-resolved per run.
+DEFAULT_JUDGE_MODEL = "gpt-4o-2024-08-06"
 
 # Reader context budget (tiktoken estimate). Above this we truncate oldest
 # messages and flag the question as truncated.

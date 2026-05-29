@@ -13,15 +13,54 @@ consumes the pack's public surface: ``Graph``, ``Runtime``, ``pack``,
 
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass, field
 from typing import Any, Optional
 
 from activegraph import Graph, Runtime
 from activegraph_memory import MemorySettings, pack
+from activegraph_memory.tools.embeddings import (
+    OpenAIEmbeddingProvider,
+    set_active_provider,
+)
 
+from .config import CACHE_DIR
 from .dataset import Instance
+from .embedding_cache import CachedEmbeddingProvider
 
 _MEMORY_TYPES = ("memory_claim", "episodic_memory", "procedural_memory")
+
+# Same embedding model the original activegraph-longmemeval substrate test used.
+EMBEDDING_MODEL = "text-embedding-3-small"
+
+# Per-process cached provider. ``run_pack`` is called once per question, but each
+# ProcessPoolExecutor worker handles many questions; building a fresh provider
+# (and SQLite connection) per question would leak file descriptors over a long
+# run. Cache it once per worker process and reuse.
+_EMBEDDING_PROVIDER: Optional[CachedEmbeddingProvider] = None
+
+
+def _install_embedding_provider() -> Optional[str]:
+    """Install a real OpenAI embeddings provider for semantic vector search.
+
+    Uses the user-provided real OPENAI_API_KEY (the Replit AI proxy does not
+    expose an embeddings endpoint). Falls back to the pack's offline
+    deterministic provider when no key is present. Returns the model name when a
+    real provider was installed, else None. The cached provider is built once per
+    process and reused across questions.
+    """
+    global _EMBEDDING_PROVIDER
+    key = os.environ.get("OPENAI_API_KEY")
+    if not key:
+        set_active_provider(None)  # reset to deterministic default
+        return None
+    if _EMBEDDING_PROVIDER is None:
+        base = OpenAIEmbeddingProvider(EMBEDDING_MODEL, api_key=key)
+        _EMBEDDING_PROVIDER = CachedEmbeddingProvider(
+            base, model=EMBEDDING_MODEL, cache_path=CACHE_DIR / "embeddings.sqlite"
+        )
+    set_active_provider(_EMBEDDING_PROVIDER)
+    return EMBEDDING_MODEL
 
 
 @dataclass
@@ -67,6 +106,7 @@ def run_pack(
     instance: Instance, settings: Optional[MemorySettings] = None
 ) -> EvidenceBundle:
     settings = settings or MemorySettings()
+    _install_embedding_provider()
     g = Graph()
     rt = Runtime(g)
     rt.load_pack(pack, settings=settings)

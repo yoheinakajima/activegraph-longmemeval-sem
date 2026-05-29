@@ -60,3 +60,36 @@ number. Weakest on cross-session synthesis (multi-session, preference).
 `--concurrency N` flag (ProcessPoolExecutor, default 1) — N=3 on the 4-core box gave
 ~3x throughput with byte-identical per-question results (fresh Graph/Runtime/pack,
 temp-0). Workspace sleeps when idle, so a long run only advances while awake.
+
+**Long runs MUST be workflows, not nohup.** A `nohup ... &` background job in a
+bash tool call gets reaped when that tool call's shell session ends (dies ~immediately
+after the launching call returns, regardless of `nohup`). Symptom: run advances only
+during the launching call's own `sleep`, then process count = 0. Fix: launch via
+`configureWorkflow` (console outputType) — workflow processes are Replit-managed and
+persist across tool calls. The harness resumes from `runs/<id>/store.sqlite` (table
+`questions`, not `records`) so a killed run loses nothing on relaunch. Memory: the s
+split is heavy (277MB JSON in parent + per-worker graphs); concurrency 2 is safe on
+the 7.7GB box, 4 risked OOM alongside the auto-restarting full-s workflow.
+
+**Replit AI proxy has NO embeddings endpoint** (`POST /embeddings` → INVALID_ENDPOINT;
+see ai-integrations-openai "Unsupported Capabilities"). To use real
+`text-embedding-3-small` (dim 1536) you need a real `OPENAI_API_KEY` (default base_url),
+which also serves `gpt-4o-2024-08-06` (so judge-snapshot parity IS achievable with a
+real key, unlike via the proxy). Pack stays key-agnostic; harness installs the provider.
+
+**Embedding cache (reproducibility + speed):** `CachedEmbeddingProvider`
+(`longmemeval_harness/embedding_cache.py`) wraps the pack provider with a process-safe
+SQLite disk cache at `.cache/embeddings.sqlite`, keyed by blake2b(model+text). Store
+vectors as float64 ('d') so a cached read is bit-identical to the first API value →
+re-runs reproducible & free. LongMemEval-S reuses distractor sessions across questions,
+so hit rate is high (one 50-q s-slice → ~22.8k unique vectors cover the rest).
+WAL + busy_timeout for the ProcessPoolExecutor workers.
+
+**Result — STRONG semantic pack (real embeddings + retrieval_limit=40 + vector on),
+50-q s-slice (run-id `strong-embed-s`, May 2026):** Overall **68%** (34/50) vs the
+deterministic-retrieval baseline 60.6% on full-s (same stratified slice comparable by
+type) → +7.4 pts. Judge `gpt-4o-2024-08-06` (real key). By type: knowledge-update
+100% (8), single-session-assistant 100% (6), single-session-user 71% (7), multi-session
+69% (13), single-session-preference 33% (3), temporal-reasoning 38% (13). turn_aic_recall
+0.815, session_aic_recall 0.98. 0 errors. temporal-reasoning is now the weak spot.
+NOTE: this is the 50-q slice only; full-s strong run + Phase-2 LLM extraction not yet done.

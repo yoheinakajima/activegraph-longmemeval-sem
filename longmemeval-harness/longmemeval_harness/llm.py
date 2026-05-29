@@ -49,18 +49,26 @@ class LLMClient:
 
     def _openai_client(self):
         if self._openai is None:
-            miss = _missing(
-                "AI_INTEGRATIONS_OPENAI_BASE_URL",
-                "AI_INTEGRATIONS_OPENAI_API_KEY",
-            )
-            if miss:
-                raise LLMError(f"OpenAI integration env vars missing: {miss}")
             from openai import OpenAI
 
-            self._openai = OpenAI(
-                base_url=os.environ["AI_INTEGRATIONS_OPENAI_BASE_URL"],
-                api_key=os.environ["AI_INTEGRATIONS_OPENAI_API_KEY"],
-            )
+            # Prefer the user-provided real OpenAI key (default base_url) so the
+            # judge can run on the exact gpt-4o-2024-08-06 snapshot, which the
+            # Replit AI proxy does not expose. Fall back to the integration
+            # proxy when no real key is configured.
+            real_key = os.environ.get("OPENAI_API_KEY")
+            if real_key:
+                self._openai = OpenAI(api_key=real_key)
+            else:
+                miss = _missing(
+                    "AI_INTEGRATIONS_OPENAI_BASE_URL",
+                    "AI_INTEGRATIONS_OPENAI_API_KEY",
+                )
+                if miss:
+                    raise LLMError(f"OpenAI integration env vars missing: {miss}")
+                self._openai = OpenAI(
+                    base_url=os.environ["AI_INTEGRATIONS_OPENAI_BASE_URL"],
+                    api_key=os.environ["AI_INTEGRATIONS_OPENAI_API_KEY"],
+                )
         return self._openai
 
     def _anthropic_client(self):

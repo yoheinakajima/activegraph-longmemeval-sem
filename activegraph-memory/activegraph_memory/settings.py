@@ -21,7 +21,7 @@ class MemorySettings(BaseModel):
     enable_procedural_memory: bool = True
     enable_retrieval_planning: bool = True
     enable_keyword_retrieval: bool = True
-    enable_vector_retrieval: bool = False
+    enable_vector_retrieval: bool = True
     enable_contradiction_detection: bool = True
     enable_temporal_resolution: bool = True
     enable_numeric_scope: bool = True
@@ -37,8 +37,8 @@ class MemorySettings(BaseModel):
 
     # Retrieval shape
     retrieval_mode_default: Literal["standard", "deep"] = "standard"
-    retrieval_limit: int = Field(default=10, ge=1)
-    fallback_retrieval_limit: int = Field(default=5, ge=1)
+    retrieval_limit: int = Field(default=40, ge=1)
+    fallback_retrieval_limit: int = Field(default=20, ge=1)
     include_superseded_in_standard_retrieval: bool = False
     include_archived_in_standard_retrieval: bool = False
 

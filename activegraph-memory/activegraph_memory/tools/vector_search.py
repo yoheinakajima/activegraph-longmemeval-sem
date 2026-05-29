@@ -15,8 +15,8 @@ from activegraph.packs import tool
 
 from activegraph_memory.constants import EXCLUDED_FROM_STANDARD_RETRIEVAL, MEMORY_TYPES
 from activegraph_memory.tools.embeddings import (
-    DeterministicEmbeddingProvider,
     EmbeddingProvider,
+    get_active_provider,
 )
 from activegraph_memory.tools.keyword_search import SearchHit
 from activegraph_memory.tools.scoring import cosine_similarity
@@ -44,10 +44,12 @@ def vector_search_fn(
 ) -> list[SearchHit]:
     types = tuple(memory_types) if memory_types else MEMORY_TYPES
     excluded = set(exclude_statuses or EXCLUDED_FROM_STANDARD_RETRIEVAL)
-    p = provider or DeterministicEmbeddingProvider()
-    qvec = p.embed(query)
+    p = provider or get_active_provider()
 
-    hits: list[SearchHit] = []
+    # Gather candidate (object, content) pairs first, then embed all contents
+    # in a single batched call so a real provider can cache/batch instead of
+    # making one network request per object.
+    candidates: list[tuple] = []
     for obj in objects:
         if obj.type not in types:
             continue
@@ -57,7 +59,17 @@ def vector_search_fn(
         content = str(data.get("content", ""))
         if not content:
             continue
-        score = cosine_similarity(qvec, p.embed(content))
+        candidates.append((obj, content))
+
+    if not candidates:
+        return []
+
+    qvec = p.embed(query)
+    cvecs = p.embed_many([c for _, c in candidates])
+
+    hits: list[SearchHit] = []
+    for (obj, content), cvec in zip(candidates, cvecs):
+        score = cosine_similarity(qvec, cvec)
         if score <= 0.0:
             continue
         hits.append(SearchHit(

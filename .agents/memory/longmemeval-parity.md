@@ -185,3 +185,24 @@ preference turn never surfaced among 21 retrieved sessions) — not safely fixab
 the pack without risking the perfect strong types. Runs: baseline `phase2-llm-s`,
 final `task7-v3-s`. (`task7-v2-s` was a void run — duration refs silently failed the
 Literal validation, so it equaled v1/baseline on temporal.)
+
+**Track 1 — role-aware assistant retention, FULL 500 (run-id `task19-retain-500`
+vs baseline `task18-flat-500`, May 2026):** the extraction-gap fix flagged above
+(LLM extractor distills facts *about the user* and drops *assistant-authored*
+content, so single-session-assistant cratered .964→.750). Fix = extract assistant
+turns under a separate cache namespace at ingest (`--retain-assistant-facts`,
+default ON; USER-turn path byte-identical so the A/B isolates exactly this). Same
+flat retrieval + frozen parity reader as the baseline. **Result: a clean,
+type-local win.** Overall 0.834→**0.848** (+7q, ns at the overall level). The
+target type moves decisively: **single-session-assistant turn-hit .696→.964,
+accuracy .750→~.964; McNemar net +13 (b=1,c=14), p=0.0010 significant.** Crucially
+**no other type significantly regressed** — multi-session −3, temporal −3,
+preference −1, ssu +0, knowledge-update +1, all p≥0.63 (binomial noise). Cost:
+reader context grows (mean ~8.0k→9.6k tokens) since assistant facts add to the
+retrieved set, but precision holds (acc|hit=1 unchanged ~0.86). **Verdict:
+PROMOTED to default-ON.** This validates the "recover assistant content at ingest
+is a clean side-effect-free win" prediction from the full-500 failure analysis.
+The remaining headroom is the OTHER inversion noted above — reader-reasoning on
+evidence-present failures (temporal/multi-session/preference) — which the Track 2
+scaffolded reader was tested for and FAILED (see agentic-retrieval-experiment.md;
+kept flag-gated OFF, default `parity`).

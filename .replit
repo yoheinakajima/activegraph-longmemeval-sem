@@ -24,10 +24,6 @@ args = "LongMemEval full-s run"
 task = "workflow.run"
 args = "LongMemEval stop-fix validation"
 
-[[workflows.workflow.tasks]]
-task = "workflow.run"
-args = "LME slice eval"
-
 [[workflows.workflow]]
 name = "LongMemEval full-s run"
 author = "agent"
@@ -49,17 +45,6 @@ outputType = "console"
 [[workflows.workflow.tasks]]
 task = "shell.exec"
 args = "cd longmemeval-harness && ../.pythonlibs/bin/python -u -m longmemeval_harness --size small --split s --reader sonnet --run-id pref-extract-s --limit 50 --concurrency 2 --extraction llm"
-
-[[workflows.workflow]]
-name = "LME slice eval"
-author = "agent"
-
-[workflows.workflow.metadata]
-outputType = "console"
-
-[[workflows.workflow.tasks]]
-task = "shell.exec"
-args = "cd longmemeval-harness && ../.pythonlibs/bin/python -u -m longmemeval_harness --size full --split s --reader sonnet --extraction llm --retain-assistant-facts --reader-mode parity --run-id task19-retain-500 --concurrency 3"
 
 [agent]
 stack = "PNPM_WORKSPACE"

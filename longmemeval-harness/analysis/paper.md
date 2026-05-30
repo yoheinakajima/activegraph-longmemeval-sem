@@ -27,7 +27,8 @@ that retains assistant facts recovers **all 14** coverage failures and lifts the
 raising overall accuracy to **0.848**. The single residual failure is a *fidelity* (not
 coverage) case: a verbatim literary quote the extractor paraphrases away. Finally, we
 report a **negative result** for the other predicted lever — a non-parity reasoning
-scaffold on the reader regressed a 50-question slice (0.92 → 0.88) and was not shipped.
+scaffold on the reader regressed a 50-question slice (0.940 → 0.880; fixed 1, broke 4)
+and was not shipped.
 We conclude that on this benchmark the actionable headroom is at **ingest precision and
 fidelity**, not at read-time scaffolding or retrieval breadth.
 
@@ -140,6 +141,16 @@ type it is net +13 of 56 (p = 0.0010), and **no other type shows a significant c
 (all per-type p ≥ 0.63; see §3.3). The aggregate looks modest only because a significant
 +13 on one type is diluted across 500 questions.
 
+A paired bootstrap (20k resamples over the 500 per-question outcomes) confirms the
+distinction directly on the *delta*, not just each run's accuracy: the overall retain−flat
+delta is **+0.014, 95% CI [−0.018, +0.046]** (straddles zero), whereas the
+`single-session-assistant` delta is **+0.232, 95% CI [+0.107, +0.357]** (excludes zero).
+The per-type gain also survives multiple-comparison correction across the six question
+types: Holm-adjusted **p = 0.0059**, and the raw p = 0.0010 clears the Bonferroni
+threshold 0.05/6 = 0.0083, while every other type has Holm-adjusted p = 1.0. So "no
+collateral damage" is the corrected reading, not a descriptive hand-wave: exactly one
+type moves.
+
 ### 3.3 Per-question-type breakdown
 
 | Type (n) | deterministic | flat-llm | agentic-llm | retain | retain−flat (McNemar b/c, p) |
@@ -195,6 +206,28 @@ deterministic (0.907). This is a selection effect, not a reader regression — t
 deterministic system only surfaces evidence for the easy half of questions, so its
 "evidence-present" subset is easier; LLM extraction surfaces evidence for the hard
 questions too, and those are harder to reason over even with the evidence in hand.
+
+### 3.5 Operational cost of retention
+
+Retention changes ingest extraction, not retrieval breadth. The retrieval primary limit
+is 40 (median 40, p95 40 in both runs); a fallback occasionally adds a few items (flat
+max 56, retain max 52; 14/500 and 11/500 questions exceed 40), but the retrieved-set size
+distribution is effectively identical across the two runs — so retrieval *breadth* is not
+what retention changes; assistant memories compete within the same retrieved set rather
+than enlarging it. What
+grows is per-item length: mean reader context rises from **8,042 to 9,569 tokens** (+19%;
+median 7,896 → 9,174, p95 10,923 → 14,027) and total reader tokens from 4.53M to 5.38M,
+because retained assistant memories preserve verbatim lists and numbers. Counter-
+intuitively, total extracted memories *fall* (mean **779.9 → 718.5** per question): with
+retention off, assistant turns are still extracted, but under the liberal user-centric
+prompt, which emits many mis-attributed, non-recallable memories; retention routes them
+to a targeted assistant prompt that emits fewer but answer-bearing memories. User-turn
+extraction is byte-identical between the two runs — the extraction cache key omits role on
+the user path, so user turns are cache hits with identical results, verified by
+`test_user_path_identical_regardless_of_retain_flag` — so the entire claim-count and
+context-size delta is the assistant-path change alone. We deliberately do *not* report
+wall-clock as a cost: both runs are served from a content-addressed extraction/embedding
+cache, so runtime is dominated by cache warmth and is not a clean measure.
 
 ## 4. Failure analysis
 
@@ -281,17 +314,26 @@ dominant error class.
 ### 4.4 A negative result: read-time reasoning scaffold does not pay off
 
 §4.3 makes read-time reasoning the obvious next lever, so we tested it directly. We added
-a non-parity reader mode that scaffolds the answer (identify question type → extract
-evidence notes → perform explicit date/aggregation/current-state computation → emit a
-concise `ANSWER:`), gated behind a flag so the frozen parity reader is untouched. On the
-mandated 50-question validation slice it **regressed** accuracy (0.92 → 0.88): it fixed a
-couple of temporal cases but broke more elsewhere, including two preference questions where
-the extra reasoning steps talked the reader out of a correct grounded answer. Per the
-pre-registered gate (only promote interventions that improve the slice), the scaffold was
-**not** shipped to default and the corresponding full run was **not** executed; the mode
-ships flag-gated **off**. We report this as a negative result: a generic chain-of-thought
-scaffold is not a free win on this benchmark, and the targeted reasoning fixes that would
-help (a dedicated date-normalization or recency-selection pass) remain future work.
+a non-parity reader mode that scaffolds the answer with *structured, visible* evidence
+(identify question type → extract evidence notes → perform explicit
+date/aggregation/current-state computation → emit a concise `ANSWER:` that is parsed back
+out), gated behind a flag so the frozen parity reader is untouched. This is a structured
+evidence compiler, not a hidden "think step by step" prompt. We validated it on a
+50-question slice (seed 42 — the same instances as the parity run `pref-extract-s`, with
+retention on, differing in reader mode; both runs request `claude-sonnet-4-5`, though the
+scaffold manifest pins the `-20250929` snapshot while the parity manifest records the
+alias, so the intended single variable is the reader mode modulo same-family resolution),
+and it **regressed** accuracy from 0.940 to 0.880 (net −3 of 50). It fixed exactly one question (a knowledge-update) and broke
+four — one multi-session, one temporal-reasoning, and **two single-session-preference** —
+where the added reasoning steps talked the reader out of a correct grounded answer. Mean
+reader output grew from 97 to 449 completion tokens while the `ANSWER:` parse stayed
+reliable, so the regression reads as *overthinking*, not an answer-format mismatch or a
+context-length artifact. Per the pre-registered gate (only promote interventions that
+improve the slice), the scaffold was **not** shipped to default and the corresponding full
+run was **not** executed; the mode ships flag-gated **off**. The lesson is narrow but
+real: even a structured, visible evidence compiler is not a free win on this benchmark,
+and the targeted reasoning fixes that would actually help (a deterministic
+date-normalization or recency-selection pass) remain future work.
 
 ## 5. Discussion: where the headroom actually is
 
@@ -333,9 +375,14 @@ good demo.
   residual `single-session-assistant` fidelity failure.
 - **S split only.** Results are for cleaned LongMemEval-S (500); the larger / oracle
   splits are untested here.
-- **Turn-hit is a proxy.** The recall/reasoning decomposition relies on gold-turn
-  matching as the definition of "evidence present"; a retrieved-but-unhelpful gold turn
-  would be miscounted as evidence-present.
+- **Turn-hit is a proxy, defined precisely** as `turn_hit = (gold_turns ⊆ ctx_turns)`,
+  where `gold_turns` are the dataset's `has_answer` turn ids and `ctx_turns` are the
+  source-turn ids recovered from each *retrieved memory's* provenance. It therefore
+  measures whether a memory **derived from the gold turn** was retrieved — not raw-turn
+  retrieval and not memory-text matching. It can (a) undercount when a memory derived from
+  a non-gold turn is semantically sufficient, and (b) read 0 when the gold-turn memory was
+  paraphrased so the query no longer retrieves it — exactly the residual Borges case
+  (§4.2), where the source turn's "sphere/circumference" sentence was compressed away.
 - **Read-time scaffold tested at 50 questions.** The negative result in §4.4 is a slice
   decision under the pre-registered gate, not a full-500 measurement; a more targeted
   reasoning intervention could still pay off and was not exhaustively explored.
@@ -380,3 +427,41 @@ context, reader hypothesis, gold answer, judge decision, turn/session recall and
 token counts, and latencies. Run-level configuration (extraction, retrieval, reader mode,
 retention flag, judge/reader/dataset identifiers) is recorded in each run's
 `manifest.json`.
+
+## Appendix B: Assistant-retention audit (the 14 recovered questions)
+
+The table below is the per-question audit for every `single-session-assistant` question
+that was wrong under `task18-flat-500` and correct under `task19-retain-500`. In **all 14**,
+`turn_hit` flips `0 → 1`: under flat the gold assistant turn produced no retrievable
+memory (the reader typically abstains, "I don't have any record…"); under retain a
+`"The assistant …"` memory derived from that exact turn is retrieved and carries the gold
+answer. User-authored memories are unchanged across the two runs (cache-keyed user path,
+§3.5). The snippet column is the highest gold-overlap assistant memory found in the
+assembled context; `turn_hit = 1` is the rigorous proof that a memory derived from the
+gold turn was retrieved.
+
+| qid | gold answer | flat | retain | retained assistant memory that carried the answer |
+|---|---|---|---|---|
+| `1568498a` | 28. Kg3 | ✗ (hit=0) | ✓ (hit=1) | "the assistant made the move 28. Kg3 in a chess game." |
+| `18dcd5a5` | 4 (mummies) | ✗ | ✓ | the assistant's *Lost Temple of the Djinn* one-shot encounter breakdown |
+| `1903aded` | Transcriptionist (7th) | ✗ | ✓ | "The assistant provided a list of remote job options: 1. Virtual customer service rep… " |
+| `3e321797` | 10 minutes | ✗ | ✓ | "The assistant provided a list of remedies for under-eye dark circles (cucumber…)" |
+| `41275add` | 'How to Sit Properly at a Desk…' (Mayo Clinic) | ✗ | ✓ | "The assistant recommended the following YouTube videos for proper workplace posture: 1. 'How to Sit Properly…'" |
+| `71a3fd6b` | +49 (0) 62 32 / 14 23 - 0 | ✗ | ✓ | "The assistant provided the contact details for the tourism board of Speyer…" |
+| `7e00a6cb` | International Budget Hostel | ✗ | ✓ | "The assistant listed several budget-friendly hostels in Amsterdam…" |
+| `8752c811` | 27th = 'Sound effects…' | ✗ | ✓ | "The assistant provided a list of 100 prompt parameters…" |
+| `8aef76bc` | Mod Podge or another sealant | ✗ | ✓ | "The assistant provided a list of DIY home decor projects using recycled materials…" |
+| `a40e080f` | Patagonia and Southwest Airlines | ✗ | ✓ | "The assistant provided examples of two companies that prioritize employee safety: Patagonia and Southwest…" |
+| `b759caee` | @jessica_poole_jewellery | ✗ | ✓ | "The assistant recommended three jewelry designers… 1. Jessica Poole (@jessica_poole_jewellery)…" |
+| `ceb54acb` | 'sexual fixations', … | ✗ | ✓ | "The assistant provided the following alternatives…: 1. Sexual fixations…" |
+| `e3fc4d6e` | Dr. Arati Prabhakar | ✗ | ✓ | the assistant's summary of the LLNL fusion-breakthrough announcement |
+| `fca762bc` | Memrise | ✗ | ✓ | "The assistant recommended the language learning apps Duolingo, Rosetta Stone, Babbel, Memrise, and Lingodeer…" |
+
+The single non-recovered `single-session-assistant` question (`58470ed2`, the Borges
+*Library of Babel* verbatim quote) is the fidelity case of §4.2: a `"The assistant …"`
+memory about the Library *was* stored, but it paraphrased the source turn ("indefinite
+hexagonal galleries") and dropped the exact "sphere / center / circumference" sentence, so
+the gold-turn memory was not retrieved (`turn_hit = 0`). The deterministic substrate
+answers it because it retrieves the raw turn verbatim — the system under test retrieves
+only extracted memories (with source-turn provenance), not raw turns, which is why a
+verbatim-span anchor is the natural next ingest experiment.

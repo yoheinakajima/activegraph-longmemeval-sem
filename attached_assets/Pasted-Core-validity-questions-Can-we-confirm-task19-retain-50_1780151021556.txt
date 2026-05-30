@@ -1,0 +1,49 @@
+Core validity questions
+Can we confirm task19-retain-500 changed only assistant-turn extraction?
+The report says the user-turn extraction path is byte-identical and cache-identical between task18-flat-500 and task19-retain-500. I’d ask for a concrete diff or manifest proof showing only assistant retention changed. This is central to the clean A/B claim.
+Did retention increase context length or retrieval competition materially?
+The report says no significant collateral damage, but I’d want mean/median/p95 reader context tokens and retrieved item counts for flat vs retain. If retention adds more facts, it may improve recall while slightly increasing noise.
+Are the 14 recovered assistant cases actually recovered because assistant facts were stored, not because retrieval changed indirectly?
+I’d ask for a mini table: question id, previously missing gold turn, retained memory text, retrieved evidence rank, old answer, new answer.
+For the single residual Borges failure, was the original assistant turn actually retrieved or only the paraphrased memory?
+The report says Borges appears five times but “sphere” and “circumference” appear zero times. That suggests the exact source text was not available. I’d confirm whether the system can retrieve raw turns in addition to extracted memories, or only extracted memories.
+Is turn-hit measured against raw gold turns, extracted memories, or both?
+This matters because if the system retrieves a semantically sufficient memory but not the literal gold turn, turn_hit=0 may undercount evidence availability. The report already flags turn-hit as a proxy, but I’d want the exact matching rule.
+Statistics / reporting questions
+Can we add confidence intervals for the retain-vs-flat delta, not just each run’s accuracy?
+The overall +0.014 is not significant, while the targeted type gain is significant. A paired CI for the delta would make that distinction cleaner.
+For “no collateral damage,” what are the exact per-type discordant pairs and p-values?
+The report lists p-values in the table, but I’d ask whether multiple-comparison correction was considered or whether the claim is intentionally descriptive.
+Can we report cost/latency/token effects for retain?
+Since retention is recommended as default, the final paper should include operational cost: ingest tokens, number of extracted memories, retrieval latency, reader context size, and total runtime.
+Was the judge’s behavior stable on the newly recovered assistant questions?
+Since many are exact recall questions, I’d ask whether any recovered cases were manually spot-checked against gold to ensure judge correctness.
+Can the deterministic baseline be rejudged with the same gpt-4o-2024-08-06 judge?
+The report says the judge snapshot difference is likely ≤1 point, but for final polish, a judge-clean deterministic comparison would remove a recurring caveat.
+Reader scaffold / negative result questions
+What exactly was in the 50-question scaffold validation slice?
+Was it random, failure-enriched, stratified by type, or manually selected? Since the scaffold result is negative, the slice construction needs to be clear.
+Which questions did the scaffold fix, and which did it break?
+The report says it fixed a couple temporal cases but broke more elsewhere, including preference questions. I’d ask for the failure diff table before making the conclusion too strong.
+Was the scaffold prompt asking for hidden reasoning or for structured visible evidence?
+For product design, this matters. A generic “think step by step” scaffold failing is less informative than a structured evidence compiler failing.
+Did the scaffold regression come from longer context, answer-format mismatch, overthinking, or judge sensitivity?
+This determines whether the future work should be deterministic tools, prompt refinement, or answer-format constraints.
+Architecture / ActiveGraph thesis questions
+Does the system preserve raw turns alongside semantic memories?
+The Borges case strongly argues for a dual representation: compressed semantic memory plus raw/verbatim anchors. I’d want to know whether that is already supported or needs to be added.
+Can extracted memories link back to exact source spans?
+Not just turn ids, but character offsets or quoted spans. This would make “semantic memory compiled from the log” much more defensible.
+Should assistant facts be retained forever, or expire / compress differently?
+Benchmark-wise, retain everything. Product-wise, assistant-authored facts may create noise unless typed as artifacts, recommendations, answers, lists, calculations, etc.
+Do assistant facts need a separate retrieval boost for assistant-question patterns?
+If a question says “what did you say,” “what did you recommend,” or “what answer did you give,” retrieval should probably prioritize assistant-authored memories.
+Would a hybrid fallback recover verbatim cases cheaply?
+Example: if retrieval returns paraphrased assistant memory but the question asks for an exact quote/list/parameter, fetch the raw source turn before answering.
+What is the next targeted intervention to test: verbatim spans, date normalization, aggregation, or supersession?
+The report names all four, but for final recommendations I’d ask the researcher to rank them by expected lift and implementation complexity.
+One question I’d especially ask
+
+The single most important question:
+
+Can you produce a short audit table proving the retain fix recovered the 14 failed assistant questions by storing and retrieving assistant-authored facts, while leaving user-authored memories unchanged?

@@ -362,7 +362,102 @@ cheap slice before any full run, and measured paired against a frozen baseline o
 and what stopped a plausible-sounding reader scaffold from shipping on the strength of a
 good demo.
 
-## 6. Limitations
+## 6. Building on the ActiveGraph runtime: affordances and frictions
+
+This study is also a report on *where* it was run. ActiveGraph is an event-sourced graph
+runtime: memory state is a projection of a deterministic, replayable event log, and the
+memory system under test is a *pack* — typed objects (`memory_observation`,
+`memory_claim`/`episodic_memory`/`procedural_memory`, `memory_concept`, and the
+retrieval-lifecycle objects `retrieval_plan`/`memory_retrieval_result`/`memory_answer`)
+plus reactive behaviors (extraction, contradiction detection, consolidation, retrieval
+planning, answering) that fire on `object.created` events. Several methodological
+properties of this experiment follow directly from that design, and several costs do too.
+
+### 6.1 Affordances
+
+**Determinism by construction enables a byte-exact A/B.** The runtime's behaviors are pure
+and replayable — no wall-clock reads, no random ids, object ids are insertion-ordered — so
+given the same observations and injected providers, ingest is reproducible. The central
+validity claim of §3 (the retention condition changes *only* the assistant-extraction
+path) rests on this: we did not have to argue statistically that the user path was
+unchanged; it is identical by construction, and `test_user_path_identical_regardless_of_retain_flag`
+confirms it.
+
+**Provider-injection seams turn the system into a clean ablation rig.** Extraction,
+embeddings, and reranking are protocols (`ExtractionProvider`, `EmbeddingProvider`,
+`RerankProvider`) with deterministic defaults; the pack runs fully offline when none are
+installed. Every condition in this paper — deterministic vs LLM extraction, flat vs
+agentic retrieval, rerank on/off, assistant retention on/off — is the *same pack* with a
+different injected component, never a fork. The independent variable is a swapped provider
+and the rest of the system is held fixed by the runtime, which is exactly the control an
+ablation study wants.
+
+**First-class provenance makes the metrics and the audit possible.** Each claim links to
+its source observation via a `derived_from` relation, and observations carry the metadata
+the harness stamps (session id, turn index). The retrieval sidecar (turn/session recall
+and hit) and the per-question audit in Appendix B are therefore computed *deterministically
+from the graph*, with no LLM judge in the loop. Attributing each of the 14 recoveries to a
+specific assistant-derived claim traced back to a specific gold turn is only possible
+because provenance is a graph edge, not an opaque vector-store id.
+
+**The typed pipeline supplies the failure vocabulary.** Because ingest is
+observation → typed claim → concept and retrieval is plan → result → answer, the
+coverage-vs-fidelity distinction (§4) is structural rather than interpretive: a *coverage*
+failure is "no claim derived from the gold turn exists or was retrieved," a *fidelity*
+failure is "such a claim exists but lost the verbatim span." The object model gave the
+taxonomy its edges.
+
+**Substrate and semantic pack share one machine.** The same graph can be driven as a
+deterministic turn-node substrate (no LLM at ingest) or as the semantic pack, so the
+deterministic baseline (0.606) is a true baseline on the *same* runtime rather than a
+different system — strengthening the comparability of the 0.606 → 0.834 → 0.848 ladder.
+
+### 6.2 Frictions and threats to validity
+
+**Determinism does not extend across the LLM seam.** The runtime guarantees replayability
+for pure behaviors, but injecting an LLM extractor reintroduces nondeterminism and cost.
+We had to re-establish reproducibility *outside* the runtime: content-addressed SQLite
+caches for extraction and embeddings (blake2b keys; float64 vectors so a cached read is
+bit-identical to the first API value), plus the discipline of distinguishing a transient
+failure (never cached) from a genuine empty extraction (cached). The platform's determinism
+is a floor, not a guarantee, once external models are in the loop.
+
+**The reactive cascade is sequential within a question.** Per-observation extraction
+behaviors fire one at a time inside `run_until_idle`, so cold-cache LLM extraction (~4 min
+per question over ~485 turns) dominates wall-clock. Pre-warming the extraction cache
+concurrently over all of a question's turns before ingest fixes it, but that is a workaround
+for an ergonomic property of the model: the cascade is easy to reason about and hard to
+parallelize natively. We therefore report tokens, not runtime, as cost (§3.5).
+
+**Reactive post-processing confounds simple input accounting.** Consolidation and
+contradiction detection operate over the whole store as memories arrive, so an ingest-side
+change has non-obvious downstream effects: under retention the *total* claim count falls
+(779.9 → 718.5) even though assistant facts are added, because the same turns are now
+extracted by a more selective prompt and consolidation merges differently. Reasoning about
+"what changed" required provenance tracing, not input arithmetic — the richness that makes
+the runtime powerful also makes effects diffuse.
+
+**Strong typing makes behavior extension a multi-site edit.** Pack objects are
+pydantic/`Literal`-typed; adding a new field value (e.g. a temporal `resolution_method`)
+silently fails validation unless the corresponding `Literal` is updated, throwing inside
+the behavior with a confusing symptom (works in isolation, but the value never reaches
+assembled context). The type system catches real errors and imposes real friction.
+
+**Per-question isolation is memory-bound.** Each question rebuilds a fresh
+Graph/Runtime/pack over its haystack — the source of the clean isolation above — but the
+s-split is heavy (≈277 MB of source JSON plus per-worker graphs), so parallelism is capped
+by memory (concurrency 2 is safe on a 7.7 GB box; 4 risks OOM). Isolation trades against
+throughput.
+
+**Comparability with the prior substrate study is bounded.** The pack ships its own
+keyword/BM25-blended retrieval, whereas the earlier substrate result used dense
+`text-embedding-3-small`; our numbers are the *deferred semantic-memory experiment*, not a
+reproduction of the 85.6% substrate headline. Environment limits compound this: the model
+proxy exposes no embeddings endpoint and not the exact upstream judge snapshot, so
+knob-for-knob parity is infeasible — we record requested-vs-resolved models and retrieval
+mode throughout rather than implying continuity.
+
+## 7. Limitations
 
 - **Single reader / single judge.** All numbers are for one reader (Sonnet 4.5) and one
   judge snapshot; reader-side conclusions may not transfer to other readers.
@@ -387,7 +482,7 @@ good demo.
   decision under the pre-registered gate, not a full-500 measurement; a more targeted
   reasoning intervention could still pay off and was not exhaustively explored.
 
-## 7. Conclusion
+## 8. Conclusion
 
 On the full LongMemEval-S benchmark, LLM-based memory extraction lifts the ActiveGraph
 semantic pack from 0.606 to 0.834 and, in doing so, converts the task from a retrieval

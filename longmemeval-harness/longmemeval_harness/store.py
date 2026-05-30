@@ -38,6 +38,7 @@ CREATE TABLE IF NOT EXISTS questions (
 
     ingest_n_obs INTEGER,
     ingest_n_claims INTEGER,
+    extractor_resolved_model TEXT,
     pack_errors TEXT,
     retrieved_object_ids TEXT,
     used_memory_ids TEXT,
@@ -81,6 +82,12 @@ CREATE TABLE IF NOT EXISTS questions (
 
 _BOOL_COLS = ("is_abstention", "truncated", "turn_hit", "session_hit", "judge_correct")
 
+# Columns added after the original schema shipped; applied to pre-existing DBs by
+# RunStore._migrate so older run stores keep resuming. (column_name, sql_decl)
+_ADDED_COLUMNS = (
+    ("extractor_resolved_model", "TEXT"),
+)
+
 
 class RunStore:
     def __init__(self, db_path: Path):
@@ -90,7 +97,18 @@ class RunStore:
         self._conn.row_factory = sqlite3.Row
         self._conn.execute("PRAGMA journal_mode=WAL;")
         self._conn.executescript(_SCHEMA)
+        self._migrate()
         self._conn.commit()
+
+    def _migrate(self) -> None:
+        """Additively add columns missing from pre-existing DBs so older run
+        stores keep resuming after the schema gains a field (e.g.
+        ``extractor_resolved_model``). New stores already have every column from
+        ``_SCHEMA``; this only touches stores created before the column existed."""
+        have = {row[1] for row in self._conn.execute("PRAGMA table_info(questions)")}
+        for col, decl in _ADDED_COLUMNS:
+            if col not in have:
+                self._conn.execute(f"ALTER TABLE questions ADD COLUMN {col} {decl}")
 
     def close(self) -> None:
         self._conn.close()

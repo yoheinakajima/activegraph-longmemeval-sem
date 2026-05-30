@@ -143,6 +143,27 @@ multi-session), not retrieval breadth. **Notable inversion:** single-session-ass
 was the BEST type for deterministic (.964) and the WORST under LLM (.750) — LLM
 extraction regressed assistant-turn questions; flag for the extraction-quality track.
 
+**Full-500 paired significance + failure analysis (May 2026, scripts in
+`longmemeval-harness/analysis/`):** McNemar on the per-question outcomes confirms
+det→llm is overwhelming (net +114/500, p<1e-15, every type significant) and
+**flat≈agentic is a true null** (b=14 c=17, net +3, p=0.72; no per-type delta
+significant). **Two durable mechanistic lessons:** (1) **LLM extraction drops
+assistant-authored facts** — all 14 single-session-assistant failures have
+turn_hit=0 (gold turn never stored); turn-hit for that type falls 0.911(det)→
+0.696(llm) and accuracy tracks it (0.964→0.750, p=0.0018). The extractor distills
+facts *about the user* and discards what the *assistant* said, so "what did you
+(assistant) tell me" questions have no memory to retrieve. Recovering assistant
+content at ingest is a clean, side-effect-free win. (2) **The bottleneck flipped
+from recall to reader-reasoning**: under llm, retrieval hit-rate is 0.906 but ~72%
+of answerable errors (58/81) happen with the gold evidence already in context.
+Four reasoning failure modes: temporal arithmetic (interval mis-subtraction),
+cross-session aggregation (mis-counting/summing across sessions), knowledge
+supersession (picks the stale value though both are retrieved), preference
+grounding (generic answer despite the preference being in context). NOTE: acc|hit=1
+is *higher* for det (0.907) than llm (0.864) — a selection effect (det only surfaces
+evidence for easy questions), NOT a reader regression. Draft writeup:
+`longmemeval-harness/analysis/paper.md`.
+
 **Phase-2 weak-type tuning (50-q s-slice, May 2026):** targeted the two weakest
 types (temporal-reasoning, single-session-preference) via PACK/adapter only — the
 reader prompt is a deliberately frozen controlled constant (substrate↔pack parity),

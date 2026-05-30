@@ -6,3 +6,9 @@ id = "tq8ybl3qUH0PACw8Dx1MV"
 uri = "file://longmemeval-harness/analysis/paper.md"
 type = "text"
 title = "From Recall to Reasoning: 500-Question LongMemEval-S Evaluation (draft)"
+
+[[outputs]]
+id = "9sTaSw6xkhe-OxY9IelKL"
+uri = "file://longmemeval-harness/analysis/blog-post.md"
+type = "text"
+title = "Memory is Hard: What Semantic Memory Adds (and Breaks) on LongMemEval-S"

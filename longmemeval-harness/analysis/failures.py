@@ -7,13 +7,25 @@ Categories:
   C) flat retrieval-miss failures (turn_hit=0 & wrong).
 
 Run: ../.pythonlibs/bin/python -m analysis.failures   (from longmemeval-harness/)
+
+The three run ids are overridable to inspect a later run against the originals:
+  ../.pythonlibs/bin/python -m analysis.failures \
+      --det full-s-sonnet --flat task19-retain-500 --agentic task18-agentic-500
+The 'flat' slot is the run whose failures are categorized; 'det' is the
+regression baseline compared against it.
 """
 from __future__ import annotations
 
+import argparse
 import sqlite3
 import textwrap
 from pathlib import Path
 
+DEFAULT_RUNS = {
+    "det": "full-s-sonnet",
+    "flat": "task18-flat-500",
+    "agentic": "task18-agentic-500",
+}
 RUNS_DIR = Path(__file__).resolve().parent.parent / "runs"
 
 
@@ -36,10 +48,12 @@ def show(q: dict, max_hyp: int = 320) -> None:
     print()
 
 
-def main() -> None:
-    det = load("full-s-sonnet")
-    flat = load("task18-flat-500")
-    agentic = load("task18-agentic-500")
+def main(run_ids: dict[str, str] | None = None) -> None:
+    run_ids = run_ids or DEFAULT_RUNS
+    print("# Runs: " + "  ".join(f"{k}={v}" for k, v in run_ids.items()) + "\n")
+    det = load(run_ids["det"])
+    flat = load(run_ids["flat"])
+    agentic = load(run_ids["agentic"])
 
     print("=" * 80)
     print("A) single-session-assistant REGRESSIONS (det correct, flat wrong)")
@@ -75,5 +89,15 @@ def main() -> None:
         show(flat[q])
 
 
+def _parse_args() -> dict[str, str]:
+    p = argparse.ArgumentParser(description=__doc__)
+    p.add_argument("--det", default=DEFAULT_RUNS["det"], help="regression baseline run id")
+    p.add_argument("--flat", default=DEFAULT_RUNS["flat"],
+                   help="run whose failures are categorized")
+    p.add_argument("--agentic", default=DEFAULT_RUNS["agentic"], help="third run id")
+    a = p.parse_args()
+    return {"det": a.det, "flat": a.flat, "agentic": a.agentic}
+
+
 if __name__ == "__main__":
-    main()
+    main(_parse_args())

@@ -9,8 +9,12 @@ from .config import (
     DEFAULT_EXTRACTION_MODE,
     DEFAULT_JUDGE_MODEL,
     DEFAULT_JUDGE_PROVIDER,
+    DEFAULT_READER_MODE,
     DEFAULT_READER_PRESET,
     DEFAULT_READER_PROVIDER,
+    DEFAULT_RETAIN_ASSISTANT_FACTS,
+    QUESTION_TYPES,
+    READER_MODES,
     READER_PRESETS,
     SAMPLE_SEED,
     SPLITS,
@@ -38,6 +42,10 @@ def _build_parser() -> argparse.ArgumentParser:
                    help="named reader preset (sonnet=paper default, opus=stronger)")
     p.add_argument("--reader-model", default=None,
                    help="explicit reader model id; overrides --reader")
+    p.add_argument("--reader-mode", choices=list(READER_MODES),
+                   default=DEFAULT_READER_MODE,
+                   help="parity (frozen paper reader, default) or NON-PARITY "
+                        "scaffolded / scaffolded_with_self_check reasoning reader")
     p.add_argument("--judge-provider", default=DEFAULT_JUDGE_PROVIDER)
     p.add_argument("--judge-model", default=DEFAULT_JUDGE_MODEL)
     p.add_argument("--no-judge", action="store_true",
@@ -53,6 +61,14 @@ def _build_parser() -> argparse.ArgumentParser:
                    default=DEFAULT_EXTRACTION_MODE,
                    help="memory extraction: deterministic heuristic (default, "
                         "offline) or llm (gpt-4o-mini, cached; needs OPENAI_API_KEY)")
+    p.add_argument("--retain-assistant-facts",
+                   action=argparse.BooleanOptionalAction,
+                   default=DEFAULT_RETAIN_ASSISTANT_FACTS,
+                   help="extract facts from ASSISTANT turns at ingest (default on; "
+                        "--no-retain-assistant-facts reproduces the task18 baseline)")
+    p.add_argument("--question-type", choices=list(QUESTION_TYPES), default=None,
+                   help="restrict the benchmark to a single question type (the "
+                        "abstention *_abs variants of that type are included)")
     p.add_argument("--retrieval-strategy", choices=["flat", "agentic"],
                    default="flat",
                    help="retrieval: flat keyword+vector blend (default) or "
@@ -85,6 +101,9 @@ def main(argv: list[str] | None = None) -> int:
         run_id=args.run_id,
         reader_provider=args.reader_provider,
         reader_model=reader_model,
+        reader_mode=args.reader_mode,
+        retain_assistant_facts=args.retain_assistant_facts,
+        question_type=args.question_type,
         judge_provider=args.judge_provider,
         judge_model=args.judge_model,
         seed=args.seed,

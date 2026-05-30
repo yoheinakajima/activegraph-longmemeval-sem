@@ -26,8 +26,10 @@ from .adapter import resolve_extraction_mode, resolve_rerank_mode, run_pack
 from .config import (
     DEFAULT_JUDGE_MODEL,
     DEFAULT_JUDGE_PROVIDER,
+    DEFAULT_READER_MODE,
     DEFAULT_READER_MODEL,
     DEFAULT_READER_PROVIDER,
+    DEFAULT_RETAIN_ASSISTANT_FACTS,
     RUNS_DIR,
     SAMPLE_SEED,
     TIER_SIZES,
@@ -49,6 +51,9 @@ class RunConfig:
     run_id: Optional[str] = None
     reader_provider: str = DEFAULT_READER_PROVIDER
     reader_model: str = DEFAULT_READER_MODEL
+    reader_mode: str = DEFAULT_READER_MODE
+    retain_assistant_facts: bool = DEFAULT_RETAIN_ASSISTANT_FACTS
+    question_type: Optional[str] = None
     judge_provider: str = DEFAULT_JUDGE_PROVIDER
     judge_model: str = DEFAULT_JUDGE_MODEL
     seed: int = SAMPLE_SEED
@@ -103,12 +108,23 @@ def _run_one(inst, cfg: "RunConfig") -> dict:
     }
     try:
         t0 = time.time()
-        bundle = run_pack(inst, settings, extraction=cfg.extraction, rerank=cfg.rerank)
+        bundle = run_pack(
+            inst,
+            settings,
+            extraction=cfg.extraction,
+            rerank=cfg.rerank,
+            retain_assistant_facts=cfg.retain_assistant_facts,
+        )
         t_ingest = time.time() - t0
 
         t0 = time.time()
         reader = run_reader(
-            client, cfg.reader_provider, cfg.reader_model, inst, bundle
+            client,
+            cfg.reader_provider,
+            cfg.reader_model,
+            inst,
+            bundle,
+            reader_mode=cfg.reader_mode,
         )
         t_read = time.time() - t0
 
@@ -221,7 +237,18 @@ def run_benchmark(cfg: RunConfig) -> dict:
     data_sha = sha256_of(data_path)
     by_id = {i.question_id: i for i in instances}
 
-    sample_ids = stratified_sample(instances, TIER_SIZES[cfg.size], cfg.seed)
+    # Optional single-type filter (the *_abs abstention ids share the base type,
+    # so question_type already strips the suffix in the dataset loader). Sampling
+    # then draws the tier from the filtered pool.
+    sample_pool = instances
+    if cfg.question_type is not None:
+        sample_pool = [i for i in instances if i.question_type == cfg.question_type]
+        print(
+            f"[run] question_type={cfg.question_type}  "
+            f"pool={len(sample_pool)}/{len(instances)}"
+        )
+
+    sample_ids = stratified_sample(sample_pool, TIER_SIZES[cfg.size], cfg.seed)
     if cfg.limit is not None:
         sample_ids = sample_ids[: cfg.limit]
 
@@ -301,12 +328,14 @@ def run_benchmark(cfg: RunConfig) -> dict:
             "target_size": TIER_SIZES[cfg.size],
             "actual_size": len(sample_ids),
             "seed": cfg.seed,
+            "question_type": cfg.question_type,
         },
         "models": {
             "reader": {
                 "provider": cfg.reader_provider,
                 "requested": cfg.reader_model,
                 "resolved": resolved["reader"],
+                "mode": cfg.reader_mode,
             },
             "judge": {
                 "provider": cfg.judge_provider,
@@ -318,6 +347,7 @@ def run_benchmark(cfg: RunConfig) -> dict:
                 "requested": cfg.extraction,
                 "resolved": _resolved_extraction[0],
                 "model": _resolved_extraction[1],
+                "retain_assistant_facts": cfg.retain_assistant_facts,
             },
             "rerank": {
                 "requested": cfg.rerank,

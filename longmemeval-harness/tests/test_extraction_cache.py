@@ -247,3 +247,73 @@ def test_malformed_shape_is_cached_as_empty(tmp_path, monkeypatch):
     )
     assert ex.extract("weird message", {}) == []
     assert ex.stats() == {"cached_extractions": 1}
+
+
+# -- Track 1: role-aware assistant retention -------------------------------
+def _recorder():
+    seen: list[tuple[str, bool]] = []
+
+    def rec(content, assistant=False):
+        seen.append((content, assistant))
+        return [ExtractedMemory("semantic", "f", 0.8, None)]
+
+    return seen, rec
+
+
+def test_user_path_identical_regardless_of_retain_flag(tmp_path, monkeypatch):
+    """The USER-turn path must stay byte-identical: a user turn extracted with
+    retention ON writes the same cache entry a retention-OFF extractor reads back
+    (so the task18 user-turn cache stays valid and the A/B isolates assistants)."""
+    seen, rec = _recorder()
+    ex_on = _make_extractor(tmp_path, retain_assistant_facts=True)
+    monkeypatch.setattr(ex_on, "_call_llm", rec)
+    ex_on.extract("hello from the user", {"role": "user"})
+
+    ex_off = _make_extractor(tmp_path, retain_assistant_facts=False)
+    monkeypatch.setattr(ex_off, "_call_llm", rec)
+    ex_off.extract("hello from the user", {"role": "user"})
+
+    # One call total: the entry written under retain=ON is reused under retain=OFF.
+    assert seen == [("hello from the user", False)]
+
+
+def test_assistant_turn_uses_separate_namespace(tmp_path, monkeypatch):
+    """With retention ON, identical text from a user vs an assistant turn are two
+    distinct cache namespaces (so assistant facts are extracted and cached
+    independently, not collapsed onto the user entry)."""
+    seen, rec = _recorder()
+    ex = _make_extractor(tmp_path, retain_assistant_facts=True)
+    monkeypatch.setattr(ex, "_call_llm", rec)
+
+    ex.extract("same text", {"role": "user"})
+    ex.extract("same text", {"role": "assistant"})
+    assert seen == [("same text", False), ("same text", True)]
+    assert ex.stats() == {"cached_extractions": 2}
+
+    # Re-extraction of both roles is a pure cache hit (no new LLM calls).
+    ex.extract("same text", {"role": "user"})
+    ex.extract("same text", {"role": "assistant"})
+    assert len(seen) == 2
+
+
+def test_retain_off_routes_assistant_to_user_path(tmp_path, monkeypatch):
+    """With retention OFF, an assistant turn is routed to the user path, so an
+    assistant and user turn with identical text share one cache entry."""
+    seen, rec = _recorder()
+    ex = _make_extractor(tmp_path, retain_assistant_facts=False)
+    monkeypatch.setattr(ex, "_call_llm", rec)
+
+    ex.extract("text", {"role": "assistant"})
+    ex.extract("text", {"role": "user"})
+    assert seen == [("text", False)]
+
+
+def test_warm_routes_pairs_by_role(tmp_path, monkeypatch):
+    """warm() accepts (content, role) pairs (and bare strings as user turns) and
+    pre-extracts each under its own namespace, mirroring extract()'s routing."""
+    seen, rec = _recorder()
+    ex = _make_extractor(tmp_path, retain_assistant_facts=True)
+    monkeypatch.setattr(ex, "_call_llm", rec)
+
+    ex.warm([("u-text", "user"), ("a-text", "assistant"), "bare-text"])
+    assert set(seen) == {("u-text", False), ("a-text", True), ("bare-text", False)}

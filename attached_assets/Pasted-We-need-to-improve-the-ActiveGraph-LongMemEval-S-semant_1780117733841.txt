@@ -1,0 +1,217 @@
+We need to improve the ActiveGraph LongMemEval-S semantic-memory pack based on the latest 500-question eval results.
+
+Context:
+
+We ran three full LongMemEval-S configurations:
+
+1. deterministic + flat retrieval: 0.606
+2. LLM extraction + flat retrieval: 0.834
+3. LLM extraction + agentic retrieval: 0.840
+
+LLM extraction is a large win overall, but it introduced one clear regression and revealed a new bottleneck:
+
+* single-session-assistant dropped from 0.964 to 0.750.
+* Every flat-LLM failure in this type had turn_hit = 0.
+* Cause: the LLM extractor appears optimized for durable user facts and drops assistant-authored content.
+* Meanwhile, most remaining errors in the LLM extraction runs happen with gold evidence already retrieved, so the bottleneck has shifted from retrieval to reader-side reasoning.
+
+Goal:
+
+Improve the semantic-memory pack without overbuilding agentic retrieval. Do not make agentic retrieval the default unless it demonstrates a statistically meaningful full-500 improvement. Prioritize targeted ingest fixes and reader-side reasoning.
+
+Please implement and test the following in order.
+
+Track 1: Preserve assistant-authored facts at ingest
+
+Problem:
+The LLM extractor discards assistant-authored content that LongMemEval-S asks about, such as:
+
+* prior assistant answers
+* generated lists
+* game moves
+* calculations
+* recommendations
+* artifacts the assistant previously gave the user
+
+This causes retrieval misses on single-session-assistant.
+
+Tasks:
+
+1. Audit the current extractor prompt and schema.
+    * Identify where it biases extraction toward user facts only.
+    * Check whether assistant turns are excluded before extraction, passed but ignored, or filtered after extraction.
+2. Add explicit support for assistant-authored memory records.
+    Suggested memory types:
+    * user_fact
+    * assistant_fact
+    * preference
+    * task_artifact
+    * interaction_fact
+    * superseding_update
+    * verbatim_anchor
+3. For assistant turns, preserve factual outputs that the user may later ask about.
+    Examples:
+    * “The assistant said the party will face 3 mummies.”
+    * “The assistant listed X as the 27th parameter.”
+    * “The assistant’s chess move after 27. Kg2 Bd5+ was …”
+    * “The assistant recommended …”
+    * “The assistant calculated …”
+4. Keep these records retrievable by both semantic and keyword search.
+    * Include speaker/source metadata.
+    * Include original session id, turn id, timestamp if available.
+    * Include a short normalized claim.
+    * Include enough verbatim text to answer exact recall questions.
+5. Avoid polluting user memory.
+    Assistant facts should not be treated as user preferences or durable facts about the user unless the content explicitly implies that.
+6. Add a config flag if useful:
+    * retain_assistant_facts = true
+        Default should be true for benchmark runs.
+
+Acceptance criteria:
+
+* Re-run at least the single-session-assistant slice first.
+* Turn-hit for this type should materially improve from ~0.696.
+* Accuracy should recover toward deterministic’s 0.964 without materially reducing other categories.
+* Then confirm on the full 500.
+
+Track 2: Add reader-side reasoning scaffolding
+
+Problem:
+Under LLM extraction, retrieval mostly works. For flat-LLM, ~72% of answerable errors happen when gold evidence is already in context. The main failures are:
+
+* temporal arithmetic
+* cross-session aggregation
+* knowledge supersession/current-state selection
+* preference grounding
+
+Do not solve this by broadening retrieval first. Add a read-time reasoning layer.
+
+Tasks:
+
+1. Add an optional “evidence compiler” step before final answering.
+
+Given retrieved memories/turns and the question, produce a compact structured evidence table:
+
+* relevant fact
+* source turn/session
+* timestamp/date
+* speaker
+* whether it is current, superseded, or uncertain
+* why it matters to the question
+
+2. Add specialized reasoning helpers, preferably deterministic where possible:
+
+Temporal arithmetic
+
+* Normalize all dates mentioned in relevant evidence.
+* Build a timeline.
+* Compute intervals explicitly.
+* Return both raw duration and human-friendly duration.
+* Avoid asking the reader to do date math implicitly.
+
+Cross-session aggregation
+
+* Identify all candidate events/items.
+* Deduplicate.
+* Count or sum explicitly.
+* Include/exclude based on the question’s timeframe.
+* Return the intermediate list before final answer.
+
+Supersession/current-state resolution
+
+* When multiple facts conflict, prefer the most recent unless evidence says otherwise.
+* Mark older facts as superseded.
+* Preserve both old and new facts in evidence, but tell the reader which one is current.
+
+Preference grounding
+
+* If the question asks for advice and relevant prior behavior exists, force the answer to use that behavior.
+* Example: if the user previously bought a power bank and asks for phone battery tips, the answer should mention that known fact instead of giving generic advice.
+
+3. Modify the reader prompt only in a clearly separated non-parity mode.
+    Current parity reader prompt should remain available unchanged.
+    Add a new mode, e.g.:
+    * reader_mode = parity
+    * reader_mode = scaffolded
+    * reader_mode = scaffolded_with_self_check
+4. The scaffolded reader should follow this pattern:
+    * First identify the question type.
+    * Then build evidence notes.
+    * Then perform required computation or current-state selection.
+    * Then answer concisely.
+    * If evidence is missing, abstain.
+    * If evidence is present but requires calculation, calculate explicitly.
+5. Add a lightweight self-check pass only if cheap:
+    * Does the final answer use the most recent fact?
+    * Did we count all relevant items?
+    * Did we compute date differences correctly?
+    * Did we accidentally answer generically when there is user-specific evidence?
+
+Acceptance criteria:
+
+* Test first on a 50-question slice enriched for the four failure modes.
+* Then test on the full 500.
+* Report both parity and scaffolded numbers separately.
+* Do not compare scaffolded reader directly against the old parity run without labeling it as a non-parity improvement.
+
+Track 3: Keep retrieval simple unless evidence says otherwise
+
+Current result:
+Flat LLM retrieval: 0.834.
+Agentic LLM retrieval: 0.840.
+McNemar p = 0.72, so no statistically meaningful accuracy difference.
+
+Tasks:
+
+* Keep flat retrieval as default.
+* Keep agentic retrieval optional.
+* Only justify agentic as default if it improves full-500 accuracy significantly or materially reduces cost/context without hurting accuracy.
+* For now, focus on extraction retention and reader reasoning.
+
+Evaluation plan
+
+Please add or update scripts to produce:
+
+1. Overall accuracy.
+2. Accuracy by question type.
+3. McNemar paired significance vs current flat-LLM.
+4. Turn-hit by question type.
+5. Error decomposition:
+    * retrieval miss
+    * reasoning failure with evidence present
+    * abstention/no-gold category
+6. Specific tracking for:
+    * single-session-assistant
+    * temporal arithmetic
+    * cross-session aggregation
+    * supersession/current-state
+    * preference grounding
+
+Run order:
+
+1. Baseline sanity:
+    * Reproduce existing task18-flat-500 numbers or run a small deterministic check against existing artifacts.
+2. Assistant retention slice:
+    * Run only single-session-assistant.
+    * Confirm turn-hit improves.
+3. Full 500 assistant-retention run:
+    * Compare against current flat-LLM.
+4. Scaffolded reader 50-question failure slice:
+    * Use the same retrieval/extraction.
+    * Measure whether reasoning failures improve.
+5. Full 500 scaffolded reader run:
+    * Report separately as non-parity.
+
+Expected outcome:
+
+* Assistant-fact retention should recover much of the single-session-assistant regression.
+* Scaffolded reader should improve temporal, aggregation, supersession, and preference questions.
+* Agentic retrieval probably remains unnecessary as default.
+
+Important constraints:
+
+* Preserve the existing parity reader path.
+* Preserve reproducibility.
+* Keep run artifacts compatible with analysis/significance.py and analysis/failures.py.
+* Add clear config flags for every behavior change.
+* Do not silently change judge, reader model, dataset, retrieval limit, or evaluation scripts without documenting it.

@@ -10,14 +10,22 @@ computes:
   - context-token distribution per run
 
 Run: ../.pythonlibs/bin/python -m analysis.significance   (from longmemeval-harness/)
+
+The three run ids are overridable so the same A/B machinery can compare any
+later runs (e.g. the Track-1 retention run) against the originals:
+  ../.pythonlibs/bin/python -m analysis.significance \
+      --det full-s-sonnet --flat task18-flat-500 --agentic task19-retain-500
+The column labels stay det/flat/agentic; they are just three named slots.
 """
 from __future__ import annotations
 
+import argparse
 import math
 import sqlite3
 from pathlib import Path
 
-RUNS = {
+# Default trio: the Task #18 full-500 LLM baselines. Override any slot via CLI.
+DEFAULT_RUNS = {
     "det": "full-s-sonnet",        # deterministic extraction baseline
     "flat": "task18-flat-500",     # LLM extraction, flat retrieval
     "agentic": "task18-agentic-500",  # LLM extraction, agentic retrieval
@@ -79,8 +87,10 @@ def accuracy(data: dict, ids: list[str]) -> tuple[int, int]:
 
 # ---- analysis --------------------------------------------------------------
 
-def main() -> None:
-    runs = {name: load(rid) for name, rid in RUNS.items()}
+def main(run_ids: dict[str, str] | None = None) -> None:
+    run_ids = run_ids or DEFAULT_RUNS
+    print("# Runs: " + "  ".join(f"{k}={v}" for k, v in run_ids.items()) + "\n")
+    runs = {name: load(rid) for name, rid in run_ids.items()}
     # common, completed, answerable+abstention all included for accuracy;
     # align on the intersection of question_ids present & done in all three.
     common = set.intersection(*[{q for q, r in d.items() if r["status"] == "done"} for d in runs.values()])
@@ -146,6 +156,26 @@ def main() -> None:
     print("  retr_err   = share of answerable that are retrieval-miss failures (turn_hit=0 & wrong)")
     print()
 
+    # 3b. Turn-hit (retrieval recall) by question type — the Track-1 lever.
+    #     Answerable only (turn_hit is undefined for abstention / no gold turns).
+    print("## Turn-hit rate by question type (answerable only)")
+    print(f"{'type':<28}{'n':>6}" + "".join(f"{r:>12}" for r in ['det', 'flat', 'agentic']))
+    for label, sub_types in [("OVERALL", types)] + [(t, [t]) for t in types]:
+        ans_by_run = {}
+        n_ref = None
+        for r in ['det', 'flat', 'agentic']:
+            d = runs[r]
+            ans = [q for q in ids
+                   if d[q]["question_type"] in sub_types
+                   and d[q]["is_abstention"] == 0 and d[q]["turn_hit"] is not None]
+            n_ref = len(ans)
+            hits = sum(1 for q in ans if d[q]["turn_hit"] == 1)
+            ans_by_run[r] = (hits / n_ref) if n_ref else 0.0
+        row = f"{label:<28}{n_ref or 0:>6}"
+        row += "".join(f"{ans_by_run[r]:>12.3f}" for r in ['det', 'flat', 'agentic'])
+        print(row)
+    print()
+
     # 4. Context tokens
     print("## Context size (reader context_tokens, answerable+abstention)")
     print(f"{'run':<10}{'mean':>10}{'median':>10}{'p90':>10}")
@@ -159,5 +189,15 @@ def main() -> None:
         print(f"{r:<10}{mean:>10.0f}{median:>10.0f}{p90:>10.0f}")
 
 
+def _parse_args() -> dict[str, str]:
+    p = argparse.ArgumentParser(description=__doc__)
+    p.add_argument("--det", default=DEFAULT_RUNS["det"], help="run id for the 'det' slot")
+    p.add_argument("--flat", default=DEFAULT_RUNS["flat"], help="run id for the 'flat' slot")
+    p.add_argument("--agentic", default=DEFAULT_RUNS["agentic"],
+                   help="run id for the 'agentic' slot")
+    a = p.parse_args()
+    return {"det": a.det, "flat": a.flat, "agentic": a.agentic}
+
+
 if __name__ == "__main__":
-    main()
+    main(_parse_args())

@@ -86,10 +86,16 @@ def resolve_extraction_mode(mode: str) -> tuple[str, Optional[str]]:
     return "deterministic", None
 
 
-def _install_extractor(mode: str) -> Optional[CachedLLMExtractor]:
+def _install_extractor(
+    mode: str, retain_assistant_facts: bool = True
+) -> Optional[CachedLLMExtractor]:
     """Install the LLM extraction provider when ``mode == 'llm'`` and a real
     OPENAI_API_KEY is present; otherwise reset the pack to its deterministic
     heuristic. Returns the active extractor (for cache pre-warming) or None.
+
+    ``retain_assistant_facts`` (Track 1) toggles assistant-authored fact
+    retention on the per-process extractor. A run has a single value, so setting
+    it each call is a no-op after the first; it never changes the user-turn path.
     """
     global _EXTRACTOR
     if mode != "llm":
@@ -104,7 +110,9 @@ def _install_extractor(mode: str) -> Optional[CachedLLMExtractor]:
             api_key=key,
             model=EXTRACTION_MODEL,
             cache_path=CACHE_DIR / "extractions.sqlite",
+            retain_assistant_facts=retain_assistant_facts,
         )
+    _EXTRACTOR.retain_assistant_facts = retain_assistant_facts
     set_active_extractor(_EXTRACTOR)
     return _EXTRACTOR
 
@@ -190,17 +198,20 @@ def run_pack(
     *,
     extraction: str = "deterministic",
     rerank: str = "off",
+    retain_assistant_facts: bool = True,
 ) -> EvidenceBundle:
     settings = settings or MemorySettings()
     _install_embedding_provider()
-    extractor = _install_extractor(extraction)
+    extractor = _install_extractor(extraction, retain_assistant_facts)
     _install_reranker(rerank)
     g = Graph()
     rt = Runtime(g)
     rt.load_pack(pack, settings=settings)
 
     n_obs = 0
-    contents: list[str] = []
+    # (content, role) pairs so the extraction cache can warm assistant turns
+    # under the assistant-aware namespace and user turns under the original one.
+    warm_items: list[tuple[str, str]] = []
     for session in _sorted_sessions(instance):
         # Anchor every turn to its session timestamp. This lets the pack's
         # resolve_temporal_refs behavior turn relative mentions ("yesterday",
@@ -211,7 +222,7 @@ def run_pack(
         for turn in session.turns:
             if not turn.content:
                 continue
-            contents.append(turn.content)
+            warm_items.append((turn.content, turn.role))
             g.add_object(
                 "memory_observation",
                 {
@@ -234,7 +245,7 @@ def run_pack(
     # Pre-warm the extraction cache concurrently so the per-observation behavior
     # calls (sequential inside run_until_idle) are all cache hits.
     if extractor is not None:
-        extractor.warm(contents)
+        extractor.warm(warm_items)
     rt.run_until_idle()
 
     g.add_object(

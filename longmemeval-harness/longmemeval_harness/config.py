@@ -73,8 +73,22 @@ DEFAULT_JUDGE_MODEL = "gpt-4o-2024-08-06"
 DEFAULT_EXTRACTION_MODE = "deterministic"  # "deterministic" | "llm"
 EXTRACTION_MODEL = "gpt-4o-mini"
 
+# Track 1: retain assistant-authored facts at ingest. Default on for benchmark
+# runs; the retention-OFF baseline (task18-flat-500) is preserved for the A/B.
+DEFAULT_RETAIN_ASSISTANT_FACTS = True
+
+# Track 2: reader reasoning mode. ``parity`` is the frozen paper reader and MUST
+# stay byte-identical. The scaffolded modes are NON-PARITY: they add explicit
+# reasoning steps (temporal arithmetic, cross-session aggregation, supersession /
+# current-state, preference grounding) and parse a delimited final answer.
+READER_MODES = ("parity", "scaffolded", "scaffolded_with_self_check")
+DEFAULT_READER_MODE = "parity"
+
 # Reader context budget (tiktoken estimate). Above this we truncate oldest
 # messages and flag the question as truncated.
 MAX_CONTEXT_TOKENS = 110_000
 READER_MAX_OUTPUT_TOKENS = 1024  # paper reader max_tokens
+# Scaffolded modes emit reasoning before the final answer, so they need more
+# output headroom; parity stays at the paper value above.
+SCAFFOLDED_MAX_OUTPUT_TOKENS = 2048
 JUDGE_MAX_OUTPUT_TOKENS = 16

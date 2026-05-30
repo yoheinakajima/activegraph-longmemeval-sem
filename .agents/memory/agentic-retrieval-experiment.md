@@ -162,3 +162,35 @@ self-correction, reported as an explicitly NON-parity track). Validating the
 ingest-time LLM passes needs a cold, non-cacheable per-memory LLM pass over the
 whole corpus (tens of thousands of sequential calls), which the cacheable warm
 50-q harness loop cannot pre-warm — budget that separately before attempting.
+
+## Follow-up: scaffolded (chain-of-thought) NON-parity reader (50-q LongMemEval-S)
+
+Tested the "reader does explicit reasoning" lever directly: a NON-parity reader
+mode (`--reader-mode scaffolded`, default `parity`) that prompts identify-type →
+evidence notes → explicit computation/current-state → concise `ANSWER:` (parsed
+after the last `ANSWER:` marker; higher max-output-tokens for scaffolded only).
+The parity `READER_SYSTEM` is byte-frozen and untouched; scaffolded is a separate
+prompt path.
+
+| reader (50-q, same ids)                  | overall | vs parity |
+|------------------------------------------|---------|-----------|
+| parity (frozen paper prompt)             | 0.92    | —         |
+| scaffolded chain-of-thought              | 0.88    | −0.04     |
+
+**A scaffolded reader does NOT help — net −2 questions.** It FIXED 2 of 4
+evidence-present reasoning failures (1 knowledge-update, 1 temporal) but
+INTRODUCED 4 regressions (multi-session, temporal, and **two**
+single-session-preference). Same failure family as read-time reranking: making
+the reader deliberate harder makes it **hedge/abstain on preference questions it
+has the facts for**, and re-derive temporal/multi-hop answers wrong.
+
+**Why:** read-time reasoning cannot manufacture precision that the context
+lacks, and the extra deliberation surface gives the reader more room to talk
+itself out of a correct, already-present answer. Consistent with the whole-file
+thesis: **the bottleneck is precision at INGEST, not reasoning at READ.**
+
+**Shipped state:** scaffolded + scaffolded_with_self_check modes are built,
+flag-gated, **default `parity`**. Gate (slice B) FAILED so it was NOT promoted to
+a full run. Do not enable by default; if revisiting, target a *specific* type
+(temporal arithmetic only) rather than a blanket scaffold, and protect preference
+questions from the abstain-after-deliberation regression.

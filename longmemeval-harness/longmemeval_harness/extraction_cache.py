@@ -159,6 +159,11 @@ class CachedLLMExtractor:
             raise RuntimeError("CachedLLMExtractor requires an explicit api_key.")
         self._client = OpenAI(api_key=api_key)
         self.model = model
+        # Snapshot the provider resolves the alias to (e.g. gpt-4o-mini ->
+        # gpt-4o-mini-2024-07-18). Captured from the first LIVE response; stays
+        # None on a fully-cached run (no live call => snapshot genuinely
+        # unavailable this run, recorded as such in the manifest).
+        self.resolved_model: Optional[str] = None
         # Track 1 toggle: when True, assistant turns are extracted with the
         # assistant-aware prompt under a separate cache namespace. When False the
         # extractor behaves exactly as the retention-OFF baseline (assistant turns
@@ -273,6 +278,7 @@ class CachedLLMExtractor:
                     response_format={"type": "json_object"},
                 )
                 raw = r.choices[0].message.content or "{}"
+                self.resolved_model = getattr(r, "model", None) or self.resolved_model
                 break
             except Exception:
                 if attempt + 1 >= self._max_retries:

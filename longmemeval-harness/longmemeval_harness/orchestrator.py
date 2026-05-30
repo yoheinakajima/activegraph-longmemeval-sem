@@ -44,6 +44,22 @@ from .scoring import aggregate, score_retrieval
 from .store import RunStore
 
 
+def _resolution(requested: Optional[str], resolved_raw: Optional[str]) -> dict:
+    """Manifest fields for a model's requested-vs-resolved snapshot.
+
+    A provider "exposes" the resolved snapshot only when it returns a model id
+    that differs from the requested alias (e.g. ``gpt-4o`` ->
+    ``gpt-4o-2024-11-20``). When the API echoes back the alias unchanged, or no
+    live call was made this run (fully cache-served), the snapshot is genuinely
+    unavailable: record it explicitly as ``resolved_model: null`` +
+    ``resolved_model_unavailable: true`` rather than pretending the alias is a
+    pinned snapshot.
+    """
+    if resolved_raw and requested and resolved_raw != requested:
+        return {"resolved_model": resolved_raw, "resolved_model_unavailable": False}
+    return {"resolved_model": None, "resolved_model_unavailable": True}
+
+
 @dataclass
 class RunConfig:
     size: str = "smoke"
@@ -167,6 +183,7 @@ def _run_one(inst, cfg: "RunConfig") -> dict:
             "retrieval_summary": bundle.retrieval_summary,
             "assembled_context": bundle.assembled_context,
             "hypothesis": reader.hypothesis,
+            "extractor_resolved_model": bundle.extractor_resolved_model,
             "reader_requested_model": reader.requested_model,
             "reader_resolved_model": reader.resolved_model,
             "reader_prompt_tokens": reader.prompt_tokens,
@@ -264,9 +281,13 @@ def run_benchmark(cfg: RunConfig) -> dict:
     _resolved_extraction = resolve_extraction_mode(cfg.extraction)
     _resolved_rerank = resolve_rerank_mode(cfg.rerank)
     started = time.time()
+    # Resolved snapshots captured from live API responses. None means no live
+    # call surfaced a snapshot this run (e.g. fully cache-served extraction);
+    # rendered as resolved_model: null + resolved_model_unavailable: true below.
     resolved = {
-        "reader": cfg.reader_model,
-        "judge": cfg.judge_model,
+        "reader": None,
+        "judge": None,
+        "extraction": None,
     }
 
     def _absorb(record: dict) -> None:
@@ -275,6 +296,8 @@ def run_benchmark(cfg: RunConfig) -> dict:
             resolved["reader"] = record["reader_resolved_model"]
         if record.get("judge_resolved_model"):
             resolved["judge"] = record["judge_resolved_model"]
+        if record.get("extractor_resolved_model"):
+            resolved["extraction"] = record["extractor_resolved_model"]
         store.upsert(record)
 
     total = len(todo)
@@ -334,19 +357,20 @@ def run_benchmark(cfg: RunConfig) -> dict:
             "reader": {
                 "provider": cfg.reader_provider,
                 "requested": cfg.reader_model,
-                "resolved": resolved["reader"],
+                **_resolution(cfg.reader_model, resolved["reader"]),
                 "mode": cfg.reader_mode,
             },
             "judge": {
                 "provider": cfg.judge_provider,
                 "requested": cfg.judge_model,
-                "resolved": resolved["judge"],
+                **_resolution(cfg.judge_model, resolved["judge"]),
                 "enabled": not cfg.no_judge,
             },
             "extraction": {
                 "requested": cfg.extraction,
                 "resolved": _resolved_extraction[0],
                 "model": _resolved_extraction[1],
+                **_resolution(_resolved_extraction[1], resolved["extraction"]),
                 "retain_assistant_facts": cfg.retain_assistant_facts,
             },
             "rerank": {

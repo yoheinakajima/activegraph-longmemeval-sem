@@ -167,6 +167,9 @@ class EvidenceBundle:
     n_claims: int = 0
     answer_text: Optional[str] = None
     pack_errors: list[str] = field(default_factory=list)
+    # Snapshot the extractor's alias resolved to on a live call this question
+    # (None when extraction was deterministic or fully cache-served).
+    extractor_resolved_model: Optional[str] = None
 
 
 def _rel_ends(rel) -> tuple[Optional[str], Optional[str]]:
@@ -424,4 +427,5 @@ def run_pack(
         n_claims=n_claims,
         answer_text=(answer.data.get("answer") if answer else None),
         pack_errors=errors,
+        extractor_resolved_model=(extractor.resolved_model if extractor else None),
     )

@@ -5,14 +5,19 @@ Categories:
      statistically significant LLM-extraction regression).
   B) flat evidence-present reasoning failures (turn_hit=1 & wrong) by type.
   C) flat retrieval-miss failures (turn_hit=0 & wrong).
+  D) flat-correct / retain-wrong regressions (the assistant-retention audit;
+     only shown when a ``--retain`` run is supplied).
 
 Run: ../.pythonlibs/bin/python -m analysis.failures   (from longmemeval-harness/)
 
-The three run ids are overridable to inspect a later run against the originals:
+The run ids are overridable to inspect a later run against the originals.
+``--retain`` is a first-class slot (the Track-1 assistant-retention run); pass
+it to get the flat-correct/retain-wrong audit (section D):
   ../.pythonlibs/bin/python -m analysis.failures \
-      --det full-s-sonnet --flat task19-retain-500 --agentic task18-agentic-500
+      --flat task18-flat-500 --retain task19-retain-500
 The 'flat' slot is the run whose failures are categorized; 'det' is the
-regression baseline compared against it.
+regression baseline compared against it; 'retain' (if its run dir exists) drives
+the section-D regression audit.
 """
 from __future__ import annotations
 
@@ -25,6 +30,7 @@ DEFAULT_RUNS = {
     "det": "full-s-sonnet",
     "flat": "task18-flat-500",
     "agentic": "task18-agentic-500",
+    "retain": "task19-retain-500",
 }
 RUNS_DIR = Path(__file__).resolve().parent.parent / "runs"
 
@@ -54,6 +60,12 @@ def main(run_ids: dict[str, str] | None = None) -> None:
     det = load(run_ids["det"])
     flat = load(run_ids["flat"])
     agentic = load(run_ids["agentic"])
+    retain_id = run_ids.get("retain")
+    retain = (
+        load(retain_id)
+        if retain_id and (RUNS_DIR / retain_id / "store.sqlite").exists()
+        else None
+    )
 
     print("=" * 80)
     print("A) single-session-assistant REGRESSIONS (det correct, flat wrong)")
@@ -88,15 +100,37 @@ def main(run_ids: dict[str, str] | None = None) -> None:
     for q in miss[:5]:
         show(flat[q])
 
+    if retain is not None:
+        print("=" * 80)
+        print("D) flat-correct / retain-wrong REGRESSIONS "
+              "(assistant-retention audit)")
+        print("=" * 80)
+        common = [q for q in flat if q in retain]
+        regs = [q for q in common
+                if flat[q]["judge_correct"] == 1 and retain[q]["judge_correct"] == 0]
+        # Mirror gains for context: where retention flipped a wrong answer right.
+        gains = [q for q in common
+                 if flat[q]["judge_correct"] == 0 and retain[q]["judge_correct"] == 1]
+        print(f"regressions (flat right -> retain wrong) = {len(regs)}; "
+              f"gains (flat wrong -> retain right) = {len(gains)}; "
+              f"net = {len(gains) - len(regs):+d}\n")
+        for q in regs:
+            show(retain[q])
+
 
 def _parse_args() -> dict[str, str]:
-    p = argparse.ArgumentParser(description=__doc__)
+    p = argparse.ArgumentParser(
+        description=__doc__,
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
     p.add_argument("--det", default=DEFAULT_RUNS["det"], help="regression baseline run id")
     p.add_argument("--flat", default=DEFAULT_RUNS["flat"],
                    help="run whose failures are categorized")
     p.add_argument("--agentic", default=DEFAULT_RUNS["agentic"], help="third run id")
+    p.add_argument("--retain", default=DEFAULT_RUNS["retain"],
+                   help="Track-1 assistant-retention run id (drives section D)")
     a = p.parse_args()
-    return {"det": a.det, "flat": a.flat, "agentic": a.agentic}
+    return {"det": a.det, "flat": a.flat, "agentic": a.agentic, "retain": a.retain}
 
 
 if __name__ == "__main__":

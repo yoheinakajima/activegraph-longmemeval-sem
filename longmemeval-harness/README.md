@@ -194,6 +194,46 @@ The store keeps per-question correctness vectors, so publication-grade
 statistics (McNemar, bootstrap CIs) can be computed later from
 `store.sqlite` without re-running.
 
+## Analysis
+
+Post-run analysis lives in `analysis/` and reads the committed run stores +
+manifests; nothing here re-runs the benchmark. Inputs that are LLM-derived are
+cached to **committed** files under `analysis/data/` so the summary tables and
+figures regenerate with no network access.
+
+```bash
+# Significance: McNemar pairs + turn-hit-by-type across modes (the 4th --retain
+# slot is the assistant-fact-retention run; any slot can be omitted).
+../.pythonlibs/bin/python -m analysis.significance \
+  --det full-s-sonnet --flat task18-flat-500 \
+  --agentic task18-agentic-500 --retain task19-retain-500
+
+# Failure drill-down, incl. the flat-correct / retain-wrong regression audit.
+../.pythonlibs/bin/python -m analysis.failures \
+  --flat task18-flat-500 --retain task19-retain-500
+
+# Reproducible cleanup tables (matched-hit, abstention, triage summary, cost,
+# repro metadata incl. judge-prompt + scaffold-slice hashes). No network.
+../.pythonlibs/bin/python -m analysis.cleanup_tables
+
+# Stable 50-question scaffold dev slice: regenerate + verify its sha256.
+../.pythonlibs/bin/python -m analysis.scaffold_slice
+
+# Render all blog figures into analysis/figures/.
+../.pythonlibs/bin/python -m analysis.make_figures
+
+# (LLM, costs API) Re-triage evidence-present wrong answers -> analysis/data/.
+../.pythonlibs/bin/python -m analysis.hit1_triage --runs task18-flat-500 task19-retain-500
+```
+
+`analysis.cleanup_tables` and `analysis.make_figures` read the cached triage
+labels in `analysis/data/`; only `analysis.hit1_triage` makes live LLM calls.
+
+See `docs/` for the methodology notes:
+[prior-substrate comparison (the 2×2)](docs/prior-substrate-comparison.md),
+[instrumentation TODO](docs/instrumentation-todo.md), and the forward-looking
+[hybrid claim + raw-span retrieval](docs/vnext-hybrid-raw-span.md) design note.
+
 ## Layout
 
 ```
@@ -202,6 +242,16 @@ longmemeval-harness/
 ├── pyproject.toml
 ├── data/                       # downloaded splits (gitignored)
 ├── runs/                       # per-run outputs (gitignored)
+├── docs/                       # methodology + design notes
+├── analysis/                   # post-run analysis (reads committed stores)
+│   ├── significance.py         # McNemar pairs + turn-hit-by-type
+│   ├── failures.py             # failure drill-down + regression audit
+│   ├── cleanup_tables.py       # reproducible summary tables (no network)
+│   ├── hit1_triage.py          # LLM triage of evidence-present wrong answers
+│   ├── scaffold_slice.py       # regenerate + verify the 50-q dev slice
+│   ├── make_figures.py         # render figures/*.png
+│   ├── data/                   # committed analysis inputs (triage labels, slice)
+│   └── figures/                # committed charts + diagrams
 └── longmemeval_harness/
     ├── config.py               # paths, dataset release, tiers, default models
     ├── dataset.py              # download + SHA-256 + typed parse
@@ -220,8 +270,9 @@ longmemeval-harness/
 ## Scope
 
 In scope: the semantic pack pipeline only, on `oracle` and `s`, tiered and
-resumable, with full data capture. Out of scope: any change to the pack;
-other baselines (full-context, BM25, dense-RAG, session-level); the
-`longmemeval_m` split; GitHub work (no submodules/forks/pushes); and
-publication-grade statistics (the harness stores what's needed to compute
-them later).
+resumable, with full data capture; plus the post-run `analysis/` (significance,
+failure triage, cleanup tables, figures) computed offline from the committed
+stores. Out of scope: any change to the pack; other baselines (full-context,
+BM25, dense-RAG, session-level); the `longmemeval_m` split; GitHub work (no
+submodules/forks/pushes); and any new full benchmark run (the existing stores
+are the source of truth).

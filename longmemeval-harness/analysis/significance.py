@@ -1,21 +1,26 @@
-"""Paired significance + diagnostic analysis for the Task #18 full-500 LLM baselines.
+"""Paired significance + diagnostic analysis for the full-500 LLM baselines.
 
-Pure-stdlib (no numpy/scipy). Loads the three run stores keyed by question_id and
+Pure-stdlib (no numpy/scipy). Loads the run stores keyed by question_id and
 computes:
   - overall + per-type accuracy with Wilson 95% CIs
   - paired McNemar (exact two-sided binomial + continuity-corrected chi-square)
-    for flat-vs-agentic, flat-vs-deterministic, agentic-vs-deterministic
+    for the meaningful run pairs
   - recall-conditioned accuracy: P(correct | turn_hit=1) vs P(correct | turn_hit=0)
     and the resulting error decomposition (retrieval-miss vs reasoning-on-evidence)
+  - turn-hit (retrieval recall) by question type
   - context-token distribution per run
 
 Run: ../.pythonlibs/bin/python -m analysis.significance   (from longmemeval-harness/)
 
-The three run ids are overridable so the same A/B machinery can compare any
-later runs (e.g. the Track-1 retention run) against the originals:
+The run ids are overridable so the same A/B machinery can compare any later
+runs against the originals. There are four named slots; ``--retain`` is a
+first-class slot (the Track-1 assistant-retention run) alongside the original
+``--det/--flat/--agentic``:
   ../.pythonlibs/bin/python -m analysis.significance \
-      --det full-s-sonnet --flat task18-flat-500 --agentic task19-retain-500
-The column labels stay det/flat/agentic; they are just three named slots.
+      --det full-s-sonnet --flat task18-flat-500 \
+      --agentic task18-agentic-500 --retain task19-retain-500
+A slot is included only if its run directory exists, so older invocations that
+omit ``--retain`` (or run in an env without that run) still work unchanged.
 """
 from __future__ import annotations
 
@@ -24,12 +29,16 @@ import math
 import sqlite3
 from pathlib import Path
 
-# Default trio: the Task #18 full-500 LLM baselines. Override any slot via CLI.
+# Default quartet. Each is a named slot; override any via CLI. ``det/flat/agentic``
+# are the Task #18 LLM baselines; ``retain`` is the Track-1 assistant-retention run.
 DEFAULT_RUNS = {
-    "det": "full-s-sonnet",        # deterministic extraction baseline
-    "flat": "task18-flat-500",     # LLM extraction, flat retrieval
-    "agentic": "task18-agentic-500",  # LLM extraction, agentic retrieval
+    "det": "full-s-sonnet",            # deterministic extraction baseline
+    "flat": "task18-flat-500",         # LLM extraction, flat retrieval
+    "agentic": "task18-agentic-500",   # LLM extraction, agentic retrieval
+    "retain": "task19-retain-500",     # LLM extraction, flat, assistant retention ON
 }
+# Fixed display order; only slots whose run dir exists are shown.
+SLOT_ORDER = ["det", "flat", "agentic", "retain"]
 RUNS_DIR = Path(__file__).resolve().parent.parent / "runs"
 
 
@@ -89,32 +98,50 @@ def accuracy(data: dict, ids: list[str]) -> tuple[int, int]:
 
 def main(run_ids: dict[str, str] | None = None) -> None:
     run_ids = run_ids or DEFAULT_RUNS
-    print("# Runs: " + "  ".join(f"{k}={v}" for k, v in run_ids.items()) + "\n")
-    runs = {name: load(rid) for name, rid in run_ids.items()}
-    # common, completed, answerable+abstention all included for accuracy;
-    # align on the intersection of question_ids present & done in all three.
-    common = set.intersection(*[{q for q, r in d.items() if r["status"] == "done"} for d in runs.values()])
+    # Active slots: present in run_ids with a non-empty id and an existing store.
+    slots = [
+        s for s in SLOT_ORDER
+        if run_ids.get(s) and (RUNS_DIR / run_ids[s] / "store.sqlite").exists()
+    ]
+    if not slots:
+        requested = ", ".join(f"{s}={run_ids.get(s)!r}" for s in SLOT_ORDER) or "(none)"
+        raise SystemExit(
+            "No active slots: none of the requested runs have a store.sqlite under "
+            f"{RUNS_DIR}. Requested: {requested}"
+        )
+    print("# Runs: " + "  ".join(f"{s}={run_ids[s]}" for s in slots) + "\n")
+    runs = {s: load(run_ids[s]) for s in slots}
+    # align on the intersection of question_ids present & done in all slots.
+    common = set.intersection(
+        *[{q for q, r in d.items() if r["status"] == "done"} for d in runs.values()]
+    )
     ids = sorted(common)
-    types = sorted({runs["flat"][q]["question_type"] for q in ids})
+    types = sorted({runs[slots[0]][q]["question_type"] for q in ids})
 
-    print(f"# Aligned questions across all 3 runs: {len(ids)}\n")
+    print(f"# Aligned questions across all {len(slots)} runs: {len(ids)}\n")
+
+    cw = 22  # per-slot column width
 
     # 1. Overall + per-type accuracy with Wilson CI
     print("## Accuracy with Wilson 95% CI")
-    header = f"{'slice':<28}{'det':>22}{'flat':>22}{'agentic':>22}"
-    print(header)
+    print(f"{'slice':<28}" + "".join(f"{s:>{cw}}" for s in slots))
+
     def acc_cell(d, sub):
         k, n = accuracy(d, sub)
+        if n == 0:
+            return "-"
         lo, hi = wilson_ci(k, n)
         return f"{k/n:.3f} [{lo:.3f},{hi:.3f}]"
-    print(f"{'OVERALL ('+str(len(ids))+')':<28}" + "".join(f"{acc_cell(runs[r], ids):>22}" for r in ['det','flat','agentic']))
+
+    print(f"{'OVERALL ('+str(len(ids))+')':<28}"
+          + "".join(f"{acc_cell(runs[s], ids):>{cw}}" for s in slots))
     for t in types:
-        sub = [q for q in ids if runs['flat'][q]["question_type"] == t]
+        sub = [q for q in ids if runs[slots[0]][q]["question_type"] == t]
         label = f"{t} ({len(sub)})"
-        print(f"{label:<28}" + "".join(f"{acc_cell(runs[r], sub):>22}" for r in ['det','flat','agentic']))
+        print(f"{label:<28}" + "".join(f"{acc_cell(runs[s], sub):>{cw}}" for s in slots))
     print()
 
-    # 2. McNemar pairwise
+    # 2. McNemar pairwise (only meaningful, present pairs)
     def mcnemar(a: dict, b: dict, sub: list[str]):
         # b_count = a correct & b wrong; c_count = a wrong & b correct
         bb = sum(1 for q in sub if a[q]["judge_correct"] == 1 and b[q]["judge_correct"] == 0)
@@ -123,12 +150,17 @@ def main(run_ids: dict[str, str] | None = None) -> None:
         chi2, p_chi = mcnemar_chi2_cc(bb, cc)
         return bb, cc, p_exact, chi2, p_chi
 
-    pairs = [("flat", "agentic"), ("det", "flat"), ("det", "agentic")]
+    candidate_pairs = [
+        ("det", "flat"), ("det", "agentic"), ("det", "retain"),
+        ("flat", "agentic"), ("flat", "retain"),
+    ]
+    pairs = [(a, b) for a, b in candidate_pairs if a in runs and b in runs]
     print("## McNemar paired tests (b = first-only correct, c = second-only correct)")
     for a, b in pairs:
         print(f"\n### {a} vs {b}")
         print(f"{'slice':<28}{'b':>5}{'c':>5}{'net':>6}{'p_exact':>12}{'chi2_cc':>10}{'p_chi2':>12}{'sig':>5}")
-        for label, sub in [("OVERALL", ids)] + [(t, [q for q in ids if runs['flat'][q]['question_type'] == t]) for t in types]:
+        for label, sub in ([("OVERALL", ids)]
+                           + [(t, [q for q in ids if runs[slots[0]][q]['question_type'] == t]) for t in types]):
             bb, cc, p_exact, chi2, p_chi = mcnemar(runs[a], runs[b], sub)
             sig = "*" if p_exact < 0.05 else ""
             print(f"{label:<28}{bb:>5}{cc:>5}{cc-bb:>+6}{p_exact:>12.4f}{chi2:>10.2f}{p_chi:>12.4f}{sig:>5}")
@@ -138,8 +170,8 @@ def main(run_ids: dict[str, str] | None = None) -> None:
     #    turn_hit is undefined for abstention questions / no gold turns)
     print("## Recall-conditioned accuracy (answerable only; turn_hit defined)")
     print(f"{'run':<10}{'n_ans':>7}{'acc':>8}{'hit_rate':>10}{'acc|hit=1':>11}{'acc|hit=0':>11}{'reason_err':>11}{'retr_err':>10}")
-    for r in ['det', 'flat', 'agentic']:
-        d = runs[r]
+    for s in slots:
+        d = runs[s]
         ans = [q for q in ids if d[q]["is_abstention"] == 0 and d[q]["turn_hit"] is not None]
         n = len(ans)
         correct = sum(1 for q in ans if d[q]["judge_correct"] == 1)
@@ -147,56 +179,57 @@ def main(run_ids: dict[str, str] | None = None) -> None:
         hit0 = [q for q in ans if d[q]["turn_hit"] == 0]
         acc_h1 = sum(1 for q in hit1 if d[q]["judge_correct"] == 1) / len(hit1) if hit1 else 0
         acc_h0 = sum(1 for q in hit0 if d[q]["judge_correct"] == 1) / len(hit0) if hit0 else 0
-        # error decomposition over all answerable
         reason_err = sum(1 for q in hit1 if d[q]["judge_correct"] == 0)  # evidence present, wrong
         retr_err = sum(1 for q in hit0 if d[q]["judge_correct"] == 0)    # evidence missing, wrong
-        print(f"{r:<10}{n:>7}{correct/n:>8.3f}{len(hit1)/n:>10.3f}{acc_h1:>11.3f}{acc_h0:>11.3f}"
+        print(f"{s:<10}{n:>7}{correct/n:>8.3f}{len(hit1)/n:>10.3f}{acc_h1:>11.3f}{acc_h0:>11.3f}"
               f"{reason_err/n:>11.3f}{retr_err/n:>10.3f}")
     print("\n  reason_err = share of answerable that are evidence-present failures (turn_hit=1 & wrong)")
     print("  retr_err   = share of answerable that are retrieval-miss failures (turn_hit=0 & wrong)")
     print()
 
     # 3b. Turn-hit (retrieval recall) by question type — the Track-1 lever.
-    #     Answerable only (turn_hit is undefined for abstention / no gold turns).
     print("## Turn-hit rate by question type (answerable only)")
-    print(f"{'type':<28}{'n':>6}" + "".join(f"{r:>12}" for r in ['det', 'flat', 'agentic']))
+    print(f"{'type':<28}{'n':>6}" + "".join(f"{s:>12}" for s in slots))
     for label, sub_types in [("OVERALL", types)] + [(t, [t]) for t in types]:
-        ans_by_run = {}
-        n_ref = None
-        for r in ['det', 'flat', 'agentic']:
-            d = runs[r]
+        rates = {}
+        n_ref = 0
+        for s in slots:
+            d = runs[s]
             ans = [q for q in ids
                    if d[q]["question_type"] in sub_types
                    and d[q]["is_abstention"] == 0 and d[q]["turn_hit"] is not None]
             n_ref = len(ans)
             hits = sum(1 for q in ans if d[q]["turn_hit"] == 1)
-            ans_by_run[r] = (hits / n_ref) if n_ref else 0.0
-        row = f"{label:<28}{n_ref or 0:>6}"
-        row += "".join(f"{ans_by_run[r]:>12.3f}" for r in ['det', 'flat', 'agentic'])
-        print(row)
+            rates[s] = (hits / n_ref) if n_ref else 0.0
+        print(f"{label:<28}{n_ref:>6}" + "".join(f"{rates[s]:>12.3f}" for s in slots))
     print()
 
     # 4. Context tokens
     print("## Context size (reader context_tokens, answerable+abstention)")
     print(f"{'run':<10}{'mean':>10}{'median':>10}{'p90':>10}")
-    for r in ['det', 'flat', 'agentic']:
-        d = runs[r]
+    for s in slots:
+        d = runs[s]
         vals = sorted(d[q]["context_tokens"] for q in ids if d[q]["context_tokens"] is not None)
         n = len(vals)
+        if not n:
+            continue
         mean = sum(vals) / n
         median = vals[n // 2]
         p90 = vals[int(n * 0.9)]
-        print(f"{r:<10}{mean:>10.0f}{median:>10.0f}{p90:>10.0f}")
+        print(f"{s:<10}{mean:>10.0f}{median:>10.0f}{p90:>10.0f}")
 
 
 def _parse_args() -> dict[str, str]:
-    p = argparse.ArgumentParser(description=__doc__)
+    p = argparse.ArgumentParser(description=__doc__,
+                                formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--det", default=DEFAULT_RUNS["det"], help="run id for the 'det' slot")
     p.add_argument("--flat", default=DEFAULT_RUNS["flat"], help="run id for the 'flat' slot")
     p.add_argument("--agentic", default=DEFAULT_RUNS["agentic"],
                    help="run id for the 'agentic' slot")
+    p.add_argument("--retain", default=DEFAULT_RUNS["retain"],
+                   help="run id for the 'retain' slot (Track-1 assistant retention)")
     a = p.parse_args()
-    return {"det": a.det, "flat": a.flat, "agentic": a.agentic}
+    return {"det": a.det, "flat": a.flat, "agentic": a.agentic, "retain": a.retain}
 
 
 if __name__ == "__main__":

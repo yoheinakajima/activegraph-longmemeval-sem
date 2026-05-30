@@ -94,6 +94,31 @@ reordering. Promising directions not yet tried — a *learned/stronger* reranker
 time; or telling the reader to commit rather than hedge. Adding more retrieval
 breadth is a dead end here.
 
+## At-scale verdict: flat vs agentic on the FULL 500 (s-split, llm extraction)
+
+The 50-q ordering above (flat 0.94 > agentic 0.90) was re-tested at the full 500
+(run-ids `task18-flat-500`, `task18-agentic-500`; sonnet reader, gpt-4o judge, NO
+rerank/HyDE, 0 errors each). **It does NOT replicate: flat 0.834 vs agentic 0.840
+— a +3-question wash inside binomial noise (sd≈0.017).** Per-type Δ(agentic−flat):
+temporal-reasoning +.030, single-session-preference +.066 (the slice "agentic fixes
+preference" signal survives), knowledge-update −.038, the other three 0. So the slice
+verdict "flat beats agentic" was slice noise; at scale they are statistically tied.
+
+**Agentic looks precision-consistent, not an accuracy win** (no precision metric is
+reported — this is an inference): equal accuracy at −4.7% reader tokens (4.53M→4.32M)
+and slightly *lower* retrieval (turn_recall .940→.929, turn_hit .906→.887) — i.e. it
+answers as well from a tighter, lower-recall context. That is consistent with the
+"precision is the bottleneck" thesis, but it is
+NOT enough to flip the default: +3 questions doesn't justify the extra LLM controller
+calls and the knowledge-update regression. **Flat stays the product default.**
+
+**The bottleneck confirmed at scale is reader/precision, not recall.** turn_hit is
+.906 but accuracy .834 — a ~7-pt band where every gold turn is present yet the reader
+answers wrong. Retrieval breadth/agentic recall cannot close that; the lever is reader
+synthesis + extraction quality on the hard types (single-session-assistant .75,
+temporal .80–.84, multi-session .83). Full per-type table lives in
+`longmemeval-parity.md` (Full-500 LLM baselines).
+
 ## Follow-up: cached strong-LLM reranker on the FLAT path (50-q LongMemEval-S)
 
 Tested the "stronger reranker" lever flagged above, the right way: a cached

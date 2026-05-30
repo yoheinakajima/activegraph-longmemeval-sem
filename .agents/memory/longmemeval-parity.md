@@ -114,6 +114,35 @@ single-session-preference still weakest (0.67). Cost: extraction is the slow
 part on a cold cache (~4 min ingest/q for ~485 turns); warm cache makes re-runs
 fast+free. Full-s Phase-2 run is a separate user-confirmed step.
 
+**Full-500 LLM baselines (run-ids `task18-flat-500`, `task18-agentic-500`, May
+2026):** the first real product-config numbers at scale — LLM extraction, sonnet
+reader, gpt-4o judge, NO rerank/HyDE, 0 errors each. **flat+LLM = 0.834**,
+**agentic+LLM = 0.840** vs the deterministic-extraction full-s baseline 0.606
+(`full-s-sonnet`). Per type (n; det → flat → agentic): knowledge-update (78)
+.756→.846→.808; multi-session (133) .346→.827→.827; single-session-assistant (56)
+.964→.750→.750; single-session-preference (30) .367→.867→.933; single-session-user
+(70) .829→.943→.943; temporal-reasoning (133) .564→.805→.835. Retrieval sidecar
+(det→flat→agentic): turn_recall .608→.940→.929, turn_hit .502→.906→.887,
+session_hit .774→.983→.979. Reader tokens 4.23M→4.53M→4.32M.
+**Three durable verdicts:**
+(a) **LLM extraction is the dominant lever** — +0.228 over deterministic at scale
+(NOT a slice artifact; the 0.94 slice was optimistic but the direction holds).
+(b) **At 500, flat ≈ agentic** (0.834 vs 0.840 = +3 questions, well inside binomial
+noise sd≈0.017). The 50-q claim "flat 0.94 > agentic 0.90" does NOT replicate — the
+ordering is a wash at scale. Agentic *looks* precision-consistent (no precision
+metric is reported, but it gets equal accuracy from −4.7% reader tokens and slightly
+lower recall), with type-local gains (temporal +.030, preference +.066) offset by
+knowledge-update −.038. Not worth flipping the default for +3 noise.
+(c) **The bottleneck has flipped from recall to reader/precision.** Deterministic was
+recall-limited (turn_recall .61 ≈ accuracy .61). LLM extraction lifts turn_recall to
+.94 and turn_hit to .906, so recall is no longer binding; yet accuracy is only .834 —
+a ~7-pt gap where *all* gold turns are retrieved but the reader still answers wrong,
+plus ~9 pts of genuine turn misses. The next lever is reader synthesis on
+evidence-present failures + the hard types (single-session-assistant, temporal,
+multi-session), not retrieval breadth. **Notable inversion:** single-session-assistant
+was the BEST type for deterministic (.964) and the WORST under LLM (.750) — LLM
+extraction regressed assistant-turn questions; flag for the extraction-quality track.
+
 **Phase-2 weak-type tuning (50-q s-slice, May 2026):** targeted the two weakest
 types (temporal-reasoning, single-session-preference) via PACK/adapter only — the
 reader prompt is a deliberately frozen controlled constant (substrate↔pack parity),

@@ -49,6 +49,7 @@ args = "cd longmemeval-harness && ../.pythonlibs/bin/python -u -m longmemeval_ha
 [agent]
 stack = "PNPM_WORKSPACE"
 expertMode = true
+integrations = ["github:1.0.0"]
 
 [postMerge]
 path = "scripts/post-merge.sh"
